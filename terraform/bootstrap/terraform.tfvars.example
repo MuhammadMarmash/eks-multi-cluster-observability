@@ -1,0 +1,5 @@
+# cp terraform.tfvars.example terraform.tfvars && edit
+aws_region               = "eu-west-1"
+project                  = "obs-platform"
+state_bucket_name        = "obs-platform-tfstate-CHANGE-ME-ACCOUNT-ID"
+use_customer_managed_key = true
