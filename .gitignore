@@ -1,0 +1,44 @@
+my-handwritten-plan.md
+
+# --- Terraform ---------------------------------------------------------------
+# Provider plugins and module caches: large, machine-specific, re-downloadable.
+.terraform/
+.terraform.tfstate.lock.info
+
+# State must NEVER be committed — it holds resource attributes verbatim,
+# including sensitive values. It lives in the S3 backend created by
+# terraform/bootstrap.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Real variable and backend values are environment/account specific.
+# The committed *.example files are the templates.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+backend.hcl
+!backend.hcl.example
+
+# Saved plans can contain secrets in plaintext.
+*.tfplan
+plan.out
+crash.log
+crash.*.log
+
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored. Committing it pins
+# provider versions and checksums so CI and every engineer resolve identically.
+
+# --- Credentials / secrets ----------------------------------------------------
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+kubeconfig
+kubeconfig-*
+
+# --- Claude Code --------------------------------------------------------------
+# Scratch directory for isolated git worktrees. The settings and hooks in
+# .claude/ ARE committed — they are shared project configuration.
+.claude/worktrees/
