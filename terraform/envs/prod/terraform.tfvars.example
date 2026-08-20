@@ -1,0 +1,54 @@
+###############################################################################
+# cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars is gitignored)
+###############################################################################
+
+aws_region          = "eu-west-1"
+allowed_account_ids = ["123456789012"] # guard rail: refuse to apply elsewhere
+
+project     = "obs-platform"
+environment = "prod"
+cost_center = "platform-engineering"
+repository_url = "https://github.com/your-org/devops-project3"
+
+# --- Networking ---------------------------------------------------------------
+az_count               = 3
+workload_vpc_cidr      = "10.0.0.0/16"
+observability_vpc_cidr = "10.1.0.0/16"
+
+# true  = 1 NAT per VPC  (~$65/mo)  — lab default
+# false = 1 NAT per AZ   (~$195/mo) — production HA
+single_nat_gateway = true
+
+# --- EKS -----------------------------------------------------------------------
+kubernetes_version = "1.34"
+
+# SECURITY: replace with your office/VPN egress IP and the CI runner range.
+# 0.0.0.0/0 leaves the API server reachable from the whole internet.
+cluster_endpoint_public_access = true
+cluster_public_access_cidrs    = ["203.0.113.10/32"]
+
+node_instance_types = ["t3.large"]
+node_desired_size   = 2
+node_min_size       = 2
+node_max_size       = 6
+
+cluster_admin_role_arns = [
+  # "arn:aws:iam::123456789012:role/PlatformEngineer",
+  # "arn:aws:iam::123456789012:role/github-actions-deploy",
+]
+
+# Pin add-on versions in production so an unrelated apply never moves them.
+# addon_versions = {
+#   "vpc-cni"            = "v1.20.3-eksbuild.1"
+#   "coredns"            = "v1.12.4-eksbuild.1"
+#   "kube-proxy"         = "v1.34.1-eksbuild.2"
+#   "aws-ebs-csi-driver" = "v1.51.0-eksbuild.1"
+# }
+
+# --- ECR -------------------------------------------------------------------------
+ecr_force_delete             = true  # lab convenience; set false for real prod
+enable_ecr_enhanced_scanning = false # Inspector continuous scanning, billed per scan
+
+ci_push_role_arns = [
+  # "arn:aws:iam::123456789012:role/github-actions-ecr-push",
+]

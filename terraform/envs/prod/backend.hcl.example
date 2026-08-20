@@ -1,0 +1,10 @@
+# cp backend.hcl.example backend.hcl  (backend.hcl is gitignored)
+# then: terraform init -backend-config=backend.hcl
+#
+# Values come from `terraform -chdir=../../bootstrap output backend_config_snippet`.
+
+bucket = "obs-platform-tfstate-CHANGE-ME-ACCOUNT-ID"
+region = "eu-west-1"
+
+# Only when the state bucket uses a customer managed key:
+# kms_key_id = "arn:aws:kms:eu-west-1:123456789012:key/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
