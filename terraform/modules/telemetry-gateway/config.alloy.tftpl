@@ -1,0 +1,112 @@
+// Gateway Alloy — Cluster B.
+//
+// The single ingest point for cross-cluster telemetry. TLS and authentication
+// terminate HERE, not at the NLB, which is a plain TCP passthrough. See
+// docs/adr/0002-cross-vpc-telemetry-transport.md.
+//
+// Rendered by terraform/modules/telemetry-gateway. Do not edit in the cluster.
+
+logging {
+  level  = "${log_level}"
+  format = "logfmt"
+}
+
+// Credentials arrive as environment variables from a Kubernetes Secret, so the
+// ConfigMap this file becomes stays safe to read.
+otelcol.auth.basic "ingest" {
+  username = sys.env("INGEST_USERNAME")
+  password = sys.env("INGEST_PASSWORD")
+}
+
+otelcol.receiver.otlp "ingest" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+    auth     = otelcol.auth.basic.ingest.handler
+
+    tls {
+      cert_file = "${tls_cert_path}"
+      key_file  = "${tls_key_path}"
+    }
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+    auth     = otelcol.auth.basic.ingest.handler
+
+    tls {
+      cert_file = "${tls_cert_path}"
+      key_file  = "${tls_key_path}"
+    }
+  }
+
+  output {
+    metrics = [otelcol.processor.memory_limiter.default.input]
+    logs    = [otelcol.processor.memory_limiter.default.input]
+    traces  = [otelcol.processor.memory_limiter.default.input]
+  }
+}
+
+// Sheds load rather than being OOM-killed when a backend stalls. A killed
+// gateway drops everything in flight; a limited one refuses new batches and
+// lets the agent retry.
+otelcol.processor.memory_limiter "default" {
+  check_interval = "1s"
+  limit          = "${memory_limit}"
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  send_batch_size     = 8192
+  send_batch_max_size = 16384
+  timeout             = "2s"
+
+  output {
+%{ if lgtm_enabled ~}
+    metrics = [otelcol.exporter.otlphttp.mimir.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+%{ else ~}
+    metrics = [otelcol.exporter.debug.sink.input]
+    logs    = [otelcol.exporter.debug.sink.input]
+    traces  = [otelcol.exporter.debug.sink.input]
+%{ endif ~}
+  }
+}
+
+%{ if lgtm_enabled ~}
+// Mimir, Loki and Tempo all speak OTLP natively, so the gateway performs no
+// format conversion. These are in-cluster, plaintext hops inside Cluster B;
+// the trust boundary is the peering link, which is already behind us.
+otelcol.exporter.otlphttp "mimir" {
+  client {
+    endpoint = "${mimir_endpoint}"
+  }
+}
+
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "${loki_endpoint}"
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "${tempo_endpoint}"
+
+    tls {
+      insecure = true
+    }
+  }
+}
+%{ else ~}
+// No LGTM stack yet. The debug sink makes arrival observable in pod logs,
+// which is this pipeline's definition of done until Section 3 lands.
+otelcol.exporter.debug "sink" {
+  verbosity = "basic"
+}
+%{ endif ~}

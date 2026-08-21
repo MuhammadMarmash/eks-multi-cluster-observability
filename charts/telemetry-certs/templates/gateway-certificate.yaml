@@ -1,0 +1,28 @@
+# The gateway's server certificate. The SAN must equal the Route 53 record
+# exactly: Cluster A verifies against it, and a mismatch fails the handshake
+# after the connection has already succeeded, which reads like a network fault
+# and is not one.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: telemetry-gateway
+  namespace: {{ .Values.gatewayNamespace }}
+  labels:
+    app.kubernetes.io/part-of: telemetry-pipeline
+spec:
+  commonName: {{ .Values.gatewayDnsName }}
+  dnsNames:
+    - {{ .Values.gatewayDnsName }}
+  secretName: {{ .Values.gatewaySecretName }}
+  duration: {{ .Values.duration }}
+  renewBefore: {{ .Values.renewBefore }}
+  usages:
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ .Values.caIssuerName }}
+    kind: ClusterIssuer
+    group: cert-manager.io

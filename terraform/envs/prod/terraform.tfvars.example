@@ -52,3 +52,12 @@ enable_ecr_enhanced_scanning = false # Inspector continuous scanning, billed per
 ci_push_role_arns = [
   # "arn:aws:iam::123456789012:role/github-actions-ecr-push",
 ]
+
+# Mirror repositories for the Kubernetes platform layer are part of the
+# ecr_repositories default in variables.tf. Populate them before the first
+# prod-platform apply:
+#
+#   cd terraform && make mirror
+#
+# Versions are pinned in scripts/mirror-images.sh. Because tags are IMMUTABLE,
+# re-running the script skips anything already present rather than failing.

@@ -177,9 +177,21 @@ variable "ecr_repositories" {
     "boutique/productcatalog"    = { description = "Mirrored Online Boutique product catalog service" }
     "boutique/checkoutservice"   = { description = "Mirrored Online Boutique checkout service" }
     "boutique/loadgenerator"     = { description = "Mirrored Online Boutique load generator" }
-    "telemetry/otel-collector"   = { description = "OpenTelemetry Collector image used on Cluster A" }
     "observability/lgtm-sidecar" = { description = "Internal sidecar/tooling images for the LGTM stack" }
     "charts/platform"            = { description = "OCI Helm charts for the platform (LGTM values wrappers, boutique umbrella chart)" }
+
+    # Third-party artefacts the Kubernetes layer needs, mirrored so nothing is
+    # pulled from a public registry at deploy time (ADR 0005). Versions are
+    # pinned in scripts/mirror-images.sh; run `make mirror` to populate these.
+    "mirror/grafana/alloy"                         = { description = "Grafana Alloy — the telemetry agent on Cluster A and the gateway on Cluster B" }
+    "mirror/eks/aws-load-balancer-controller"      = { description = "AWS Load Balancer Controller — required for the gateway's internal NLB" }
+    "mirror/jetstack/cert-manager-controller"      = { description = "cert-manager controller" }
+    "mirror/jetstack/cert-manager-cainjector"      = { description = "cert-manager cainjector" }
+    "mirror/jetstack/cert-manager-webhook"         = { description = "cert-manager webhook" }
+    "mirror/jetstack/cert-manager-startupapicheck" = { description = "cert-manager startupapicheck" }
+    "charts/alloy"                                 = { description = "Grafana Alloy OCI Helm chart" }
+    "charts/aws-load-balancer-controller"          = { description = "AWS Load Balancer Controller OCI Helm chart" }
+    "charts/cert-manager"                          = { description = "cert-manager OCI Helm chart" }
   }
 }
 

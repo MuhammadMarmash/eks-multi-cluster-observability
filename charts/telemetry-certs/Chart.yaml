@@ -1,0 +1,10 @@
+apiVersion: v2
+name: telemetry-certs
+description: >-
+  Self-signed CA and the gateway server certificate for the cross-cluster
+  telemetry pipeline. Ships as a chart rather than as Terraform
+  kubernetes_manifest resources because those require the cert-manager CRDs to
+  be registered at plan time.
+type: application
+version: 0.1.0
+appVersion: "1.0"
