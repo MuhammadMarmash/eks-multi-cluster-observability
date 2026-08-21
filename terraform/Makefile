@@ -2,7 +2,7 @@
 ENV ?= prod
 DIR := envs/$(ENV)
 
-.PHONY: help fmt validate test init plan apply destroy output clean bootstrap
+.PHONY: help fmt validate test mirror init plan apply destroy output clean bootstrap
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,9 @@ test: ## Run terraform test for every module that has a tests/ directory
 	    ( cd "$$m" && terraform init -backend=false -input=false >/dev/null && terraform test ) || exit 1; \
 	  fi; \
 	done
+
+mirror: ## Mirror third-party charts and images into ECR (ADR 0005). Needs AWS credentials.
+	../scripts/mirror-images.sh
 
 bootstrap: ## Create the S3 state bucket (run once per account)
 	cd bootstrap && terraform init && terraform apply

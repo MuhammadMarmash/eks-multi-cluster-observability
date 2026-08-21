@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# Mirror every third-party chart and image the platform layer needs into ECR.
+#
+# ADR 0005 forbids pulling from public registries at deploy time. This script
+# is the only place a public registry is contacted, and it runs on an
+# engineer's or CI runner's machine, never on a cluster.
+#
+# Idempotent against ECR's IMMUTABLE tag policy: a tag that already exists is
+# skipped rather than re-pushed, so re-running after a partial failure is safe.
+#
+# Usage: AWS_REGION=eu-west-1 AWS_PROFILE=... ./scripts/mirror-images.sh
+set -euo pipefail
+
+REGION="${AWS_REGION:-eu-west-1}"
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+
+# --- Pinned versions. Bump here and nowhere else. ----------------------------
+# Keep in step with the defaults in terraform/envs/prod-platform/variables.tf
+# and with the iam-policy.json tag in terraform/modules/aws-lb-controller.
+ALLOY_CHART_VERSION="1.4.0"
+ALLOY_IMAGE_TAG="v1.12.0"
+ALB_CHART_VERSION="1.13.4"
+ALB_IMAGE_TAG="v2.13.4"
+CERT_MANAGER_VERSION="v1.19.1"
+
+log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $1" >&2; exit 1; }
+}
+require aws
+require docker
+require helm
+
+# Returns 0 when the tag already exists in ECR.
+tag_exists() {
+  local repo="$1" tag="$2"
+  aws ecr describe-images \
+    --region "$REGION" \
+    --repository-name "$repo" \
+    --image-ids "imageTag=$tag" \
+    >/dev/null 2>&1
+}
+
+mirror_image() {
+  local src="$1" repo="$2" tag="$3"
+  if tag_exists "$repo" "$tag"; then
+    warn "skip ${repo}:${tag} (already present)"
+    return 0
+  fi
+  log "image ${src} -> ${REGISTRY}/${repo}:${tag}"
+  docker pull --platform linux/amd64 "$src"
+  docker tag "$src" "${REGISTRY}/${repo}:${tag}"
+  docker push "${REGISTRY}/${repo}:${tag}"
+}
+
+mirror_chart() {
+  local chart_ref="$1" version="$2" repo="$3"
+  if tag_exists "$repo" "$version"; then
+    warn "skip chart ${repo}:${version} (already present)"
+    return 0
+  fi
+  log "chart ${chart_ref}:${version} -> oci://${REGISTRY}/${repo%/*}"
+  local workdir
+  workdir="$(mktemp -d)"
+  helm pull "$chart_ref" --version "$version" --destination "$workdir"
+  helm push "$workdir"/*.tgz "oci://${REGISTRY}/${repo%/*}"
+  rm -rf "$workdir"
+}
+
+log "authenticating docker and helm against ${REGISTRY}"
+aws ecr get-login-password --region "$REGION" \
+  | docker login --username AWS --password-stdin "$REGISTRY"
+aws ecr get-login-password --region "$REGION" \
+  | helm registry login --username AWS --password-stdin "$REGISTRY"
+
+log "adding upstream chart repositories"
+helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
+helm repo add eks https://aws.github.io/eks-charts >/dev/null
+helm repo add jetstack https://charts.jetstack.io >/dev/null
+helm repo update >/dev/null
+
+mirror_image "docker.io/grafana/alloy:${ALLOY_IMAGE_TAG}" \
+             "mirror/grafana/alloy" "${ALLOY_IMAGE_TAG}"
+mirror_image "public.ecr.aws/eks/aws-load-balancer-controller:${ALB_IMAGE_TAG}" \
+             "mirror/eks/aws-load-balancer-controller" "${ALB_IMAGE_TAG}"
+
+for component in controller cainjector webhook startupapicheck; do
+  mirror_image "quay.io/jetstack/cert-manager-${component}:${CERT_MANAGER_VERSION}" \
+               "mirror/jetstack/cert-manager-${component}" "${CERT_MANAGER_VERSION}"
+done
+
+mirror_chart "grafana/alloy"                    "${ALLOY_CHART_VERSION}"  "charts/alloy"
+mirror_chart "eks/aws-load-balancer-controller" "${ALB_CHART_VERSION}"    "charts/aws-load-balancer-controller"
+mirror_chart "jetstack/cert-manager"            "${CERT_MANAGER_VERSION}" "charts/cert-manager"
+
+log "done. registry: ${REGISTRY}"
