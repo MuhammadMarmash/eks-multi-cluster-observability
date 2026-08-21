@@ -1,0 +1,12 @@
+# Signs the gateway's server certificate. A ClusterIssuer rather than an
+# Issuer so Section 3's LGTM components can be given certificates from the
+# same CA without duplicating the material into each namespace.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.caIssuerName }}
+  labels:
+    app.kubernetes.io/part-of: telemetry-pipeline
+spec:
+  ca:
+    secretName: {{ .Values.caSecretName }}

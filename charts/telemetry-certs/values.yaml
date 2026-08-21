@@ -1,0 +1,24 @@
+# Namespace cert-manager runs in. A ClusterIssuer of type `ca` reads its
+# signing secret from cert-manager's own namespace, not from the namespace of
+# the Certificate it signs, so the CA material has to live here.
+certManagerNamespace: cert-manager
+
+# Namespace the telemetry gateway runs in. Created by Terraform, never here.
+gatewayNamespace: telemetry
+
+# The name Cluster A connects to. Must match the Route 53 record exactly, or
+# TLS verification fails on the SAN even though the connection succeeds.
+gatewayDnsName: gateway.observability.internal
+
+bootstrapIssuerName: telemetry-selfsigned-bootstrap
+caIssuerName: telemetry-ca
+caCommonName: telemetry-pipeline-ca
+caSecretName: telemetry-ca-key-pair
+gatewaySecretName: telemetry-gateway-tls
+
+# The CA outlives the leaf by a wide margin so leaf rotation never trips over
+# CA expiry. Both are cert-manager durations, not Kubernetes ones.
+caDuration: 87600h    # 10 years
+caRenewBefore: 8760h  # 1 year
+duration: 2160h       # 90 days
+renewBefore: 360h     # 15 days
