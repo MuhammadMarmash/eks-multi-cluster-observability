@@ -10,7 +10,6 @@ Cluster A pods ──▶ Alloy DaemonSet ──▶ internal NLB ──▶ Gatewa
 ```
 
 Architecture and the reasoning behind each choice:
-[the design spec](superpowers/specs/2026-08-21-cross-cluster-telemetry-pipeline-design.md),
 [ADR 0002](adr/0002-cross-vpc-telemetry-transport.md),
 [ADR 0006](adr/0006-telemetry-agent-selection.md),
 [ADR 0007](adr/0007-cross-cluster-name-resolution.md),

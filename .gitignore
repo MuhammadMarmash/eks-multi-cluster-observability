@@ -44,3 +44,8 @@ kubeconfig-*
 # Scratch directory for isolated git worktrees. The settings and hooks in
 # .claude/ ARE committed — they are shared project configuration.
 .claude/worktrees/
+
+# Working notes from the agent-assisted design workflow (specs, plans).
+# Useful locally; not part of the deliverable. The decisions that matter are
+# promoted into docs/adr/ and docs/RUNBOOK-*.md, which ARE tracked.
+superpowers/

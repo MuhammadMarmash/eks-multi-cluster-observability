@@ -12,7 +12,6 @@
 # credential travel from B to A.
 #
 # Design rationale:
-#   docs/superpowers/specs/2026-08-21-cross-cluster-telemetry-pipeline-design.md
 #   docs/adr/0006  Alloy as the unified agent
 #   docs/adr/0007  internal NLB plus a dual-associated private zone
 #   docs/adr/0008  two-stage Terraform
