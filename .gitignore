@@ -20,8 +20,10 @@ my-handwritten-plan.md
 backend.hcl
 !backend.hcl.example
 
-# Saved plans can contain secrets in plaintext.
+# Saved plans can contain secrets in plaintext. The Makefile writes a bare
+# `tfplan`, which *.tfplan does not match.
 *.tfplan
+tfplan
 plan.out
 crash.log
 crash.*.log

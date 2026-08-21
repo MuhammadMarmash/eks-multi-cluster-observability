@@ -1,0 +1,38 @@
+###############################################################################
+# cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars is gitignored)
+#
+# Apply order is not optional:
+#   1. cd ../prod && terraform apply     (the clusters must exist)
+#   2. cd ../.. && make mirror           (the charts must be in ECR)
+#   3. make platform-init && make platform-plan && make platform-apply
+###############################################################################
+
+aws_region          = "eu-west-1"
+allowed_account_ids = ["123456789012"]
+
+# Same bucket as this root module's own backend; different key.
+infra_state_bucket = "obs-platform-tfstate-123456789012"
+infra_state_key    = "prod/platform.tfstate"
+
+# --- Naming ----------------------------------------------------------------------
+private_zone_name   = "observability.internal"
+gateway_hostname    = "gateway"
+telemetry_namespace = "telemetry"
+
+# --- Pinned versions -------------------------------------------------------------
+# Each must already exist in ECR. Bump here and in scripts/mirror-images.sh
+# together, then re-run `make mirror` before applying.
+alloy_chart_version  = "1.4.0"
+alloy_image_tag      = "v1.12.0"
+alb_chart_version    = "1.13.4"
+alb_image_tag        = "v2.13.4"
+cert_manager_version = "v1.19.1"
+
+# --- Pipeline --------------------------------------------------------------------
+gateway_replicas = 2
+scrape_interval  = "60s"
+
+# Leave false until the LGTM stack exists in Cluster B. While false the gateway
+# prints arriving telemetry to its own logs, which is how the pipeline is
+# verified before Section 3 lands.
+lgtm_enabled = false
