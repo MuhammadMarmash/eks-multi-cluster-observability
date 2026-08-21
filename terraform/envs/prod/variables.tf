@@ -212,3 +212,20 @@ variable "ci_push_role_arns" {
   type        = list(string)
   default     = []
 }
+
+# --- LGTM storage ------------------------------------------------------------------
+
+variable "lgtm_namespace" {
+  description = <<-EOT
+    Namespace the LGTM stack runs in on Cluster B. Every IRSA trust policy for
+    Loki, Mimir and Tempo is pinned to this namespace, so changing it here
+    without changing where the Helm releases land breaks every S3 credential at
+    once — and the symptom is an opaque AccessDenied on first write.
+
+    Deliberately NOT the telemetry namespace that holds the gateway: an IRSA
+    trust policy is scoped to namespace/ServiceAccount, so sharing a namespace
+    would widen who can assume these roles.
+  EOT
+  type        = string
+  default     = "lgtm"
+}

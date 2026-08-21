@@ -116,6 +116,31 @@ output "ecr_login_command" {
   value       = module.ecr.docker_login_command
 }
 
+# --- LGTM durable storage -----------------------------------------------------------
+
+output "lgtm_bucket_names" {
+  description = "S3 bucket name per component. Goes into each chart's object-storage config."
+  value       = module.lgtm_storage.bucket_names
+}
+
+output "lgtm_irsa_role_arns" {
+  description = "IRSA role ARN per component. Annotate each ServiceAccount with eks.amazonaws.com/role-arn set to this."
+  value       = module.lgtm_storage.irsa_role_arns
+}
+
+# The mapping stage 2's Helm values need, in one place. The ServiceAccount names
+# are pinned in the trust policies, so the charts must be told to use them
+# rather than their own release-derived defaults.
+output "lgtm_service_account_to_role" {
+  description = "namespace/ServiceAccount -> IAM role ARN. Every entry must be reproduced exactly in the LGTM Helm values."
+  value       = module.lgtm_storage.service_account_to_role
+}
+
+output "lgtm_namespace" {
+  description = "Namespace the LGTM stack must run in. Pinned in every IRSA trust policy."
+  value       = module.lgtm_storage.namespace
+}
+
 # --- Aggregate ---------------------------------------------------------------------
 
 output "platform" {
@@ -145,6 +170,13 @@ output "platform" {
     telemetry = {
       peering_connection_id = module.security.peering_connection_id
       otlp_ports            = module.security.otlp_ports
+    }
+
+    storage = {
+      namespace               = module.lgtm_storage.namespace
+      buckets                 = module.lgtm_storage.bucket_names
+      irsa_role_arns          = module.lgtm_storage.irsa_role_arns
+      service_account_to_role = module.lgtm_storage.service_account_to_role
     }
 
     registry = module.ecr.registry_url

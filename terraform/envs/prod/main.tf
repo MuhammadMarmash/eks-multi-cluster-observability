@@ -5,6 +5,7 @@
 #   modules/security x1  -> peering + cross-VPC OTLP security groups
 #   modules/eks      x2  -> eks-workload (Cluster A), eks-observability (B)
 #   modules/ecr      x1  -> private registry for images AND OCI Helm charts
+#   modules/lgtm-storage x1 -> S3 object stores + IRSA roles for Loki/Mimir/Tempo
 #
 # Modules never call each other; this file is the only place wiring happens.
 #
@@ -14,6 +15,7 @@
 #   0003  S3 backend with native state locking
 #   0004  EKS cluster security posture
 #   0005  private registry and image supply chain
+#   0010  cloud-native storage and the IRSA model that reaches it
 ###############################################################################
 
 ###############################################################################
@@ -188,4 +190,37 @@ module "ecr" {
   push_principal_arns = var.ci_push_role_arns
 
   tags = merge(local.common_tags, { Component = "supply-chain" })
+}
+
+###############################################################################
+# 5. LGTM OBJECT STORAGE — S3 + IRSA
+#
+# Durable storage for the observability stack, and the only credential path to
+# it. Three buckets, three roles, no long-lived keys, and no role that can read
+# another signal's data.
+#
+# Deliberately in THIS root module rather than the platform one: buckets and IAM
+# are AWS infrastructure with a lifecycle far longer than any Helm release, and
+# they must survive `make platform-destroy`. Telemetry data outliving the
+# cluster is the entire point of Section 3.
+#
+#   docs/adr/0010-cloud-native-storage-and-irsa.md
+###############################################################################
+
+module "lgtm_storage" {
+  source = "../../modules/lgtm-storage"
+
+  name_prefix = "${var.project}-${var.environment}"
+  account_id  = data.aws_caller_identity.current.account_id
+
+  cluster_name       = module.eks_observability.cluster_name
+  oidc_provider_arn  = module.eks_observability.oidc_provider_arn
+  oidc_provider_host = module.eks_observability.oidc_provider_host
+
+  namespace = var.lgtm_namespace
+
+  tags = merge(local.common_tags, {
+    Tier      = "observability"
+    Component = "durable-storage"
+  })
 }
