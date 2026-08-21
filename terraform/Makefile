@@ -2,7 +2,7 @@
 ENV ?= prod
 DIR := envs/$(ENV)
 
-.PHONY: help fmt validate init plan apply destroy output clean bootstrap
+.PHONY: help fmt validate test init plan apply destroy output clean bootstrap
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -13,6 +13,14 @@ fmt: ## Rewrite all files to canonical format
 validate: ## Validate every root module (no backend, no credentials needed)
 	cd $(DIR) && terraform init -backend=false -input=false >/dev/null && terraform validate
 	cd bootstrap && terraform init -backend=false -input=false >/dev/null && terraform validate
+
+test: ## Run terraform test for every module that has a tests/ directory
+	@for m in modules/*/; do \
+	  if [ -d "$$m/tests" ]; then \
+	    printf '\033[36m==> %s\033[0m\n' "$$m"; \
+	    ( cd "$$m" && terraform init -backend=false -input=false >/dev/null && terraform test ) || exit 1; \
+	  fi; \
+	done
 
 bootstrap: ## Create the S3 state bucket (run once per account)
 	cd bootstrap && terraform init && terraform apply
