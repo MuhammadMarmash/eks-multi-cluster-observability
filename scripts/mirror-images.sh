@@ -25,6 +25,18 @@ ALB_CHART_VERSION="1.13.4"
 ALB_IMAGE_TAG="v2.13.4"
 CERT_MANAGER_VERSION="v1.19.1"
 
+# LGTM backends. Chart versions and their appVersions move together; the image
+# tag must match the chart's appVersion or the chart renders a tag that was
+# never mirrored.
+MIMIR_CHART_VERSION="6.2.0"
+MIMIR_IMAGE_TAG="3.2.0"
+LOKI_CHART_VERSION="7.3.0"
+LOKI_IMAGE_TAG="3.6.12"
+TEMPO_CHART_VERSION="1.24.4"
+TEMPO_IMAGE_TAG="2.9.0"
+ROLLOUT_OPERATOR_IMAGE_TAG="v0.31.0"
+NGINX_IMAGE_TAG="1.29-alpine"
+
 log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 
@@ -93,8 +105,22 @@ for component in controller cainjector webhook startupapicheck; do
                "mirror/jetstack/cert-manager-${component}" "${CERT_MANAGER_VERSION}"
 done
 
+mirror_image "docker.io/grafana/mimir:${MIMIR_IMAGE_TAG}" \
+             "mirror/grafana/mimir" "${MIMIR_IMAGE_TAG}"
+mirror_image "docker.io/grafana/loki:${LOKI_IMAGE_TAG}" \
+             "mirror/grafana/loki" "${LOKI_IMAGE_TAG}"
+mirror_image "docker.io/grafana/tempo:${TEMPO_IMAGE_TAG}" \
+             "mirror/grafana/tempo" "${TEMPO_IMAGE_TAG}"
+mirror_image "docker.io/grafana/rollout-operator:${ROLLOUT_OPERATOR_IMAGE_TAG}" \
+             "mirror/grafana/rollout-operator" "${ROLLOUT_OPERATOR_IMAGE_TAG}"
+mirror_image "docker.io/nginxinc/nginx-unprivileged:${NGINX_IMAGE_TAG}" \
+             "mirror/nginxinc/nginx-unprivileged" "${NGINX_IMAGE_TAG}"
+
 mirror_chart "grafana/alloy"                    "${ALLOY_CHART_VERSION}"  "charts/alloy"
 mirror_chart "eks/aws-load-balancer-controller" "${ALB_CHART_VERSION}"    "charts/aws-load-balancer-controller"
 mirror_chart "jetstack/cert-manager"            "${CERT_MANAGER_VERSION}" "charts/cert-manager"
+mirror_chart "grafana/mimir-distributed"        "${MIMIR_CHART_VERSION}"  "charts/mimir-distributed"
+mirror_chart "grafana/loki"                     "${LOKI_CHART_VERSION}"   "charts/loki"
+mirror_chart "grafana/tempo"                    "${TEMPO_CHART_VERSION}"  "charts/tempo"
 
 log "done. registry: ${REGISTRY}"

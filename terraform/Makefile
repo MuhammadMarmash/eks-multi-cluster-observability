@@ -3,7 +3,7 @@ ENV ?= prod
 DIR := envs/$(ENV)
 PLATFORM_DIR := envs/prod-platform
 
-.PHONY: help fmt validate test alloy-validate mirror init plan apply destroy output verify clean bootstrap \
+.PHONY: help fmt validate test alloy-validate lgtm-validate mirror init plan apply destroy output verify clean bootstrap \
         platform-init platform-plan platform-apply platform-destroy
 
 help: ## Show this help
@@ -27,6 +27,9 @@ test: ## Run terraform test for every module that has a tests/ directory
 
 alloy-validate: ## Render every .alloy template and validate it with the real Alloy binary (needs docker)
 	../scripts/validate-alloy-configs.sh
+
+lgtm-validate: ## Render the LGTM Helm values and template them against the real charts
+	../scripts/validate-lgtm-values.sh
 
 mirror: ## Mirror third-party charts and images into ECR (ADR 0005). Needs AWS credentials.
 	../scripts/mirror-images.sh

@@ -123,3 +123,57 @@ variable "scrape_interval" {
   type        = string
   default     = "60s"
 }
+
+# --- LGTM backends -------------------------------------------------------------
+
+variable "mimir_chart_version" {
+  description = "mimir-distributed chart version. Matches scripts/mirror-images.sh."
+  type        = string
+  default     = "6.2.0"
+}
+
+variable "loki_chart_version" {
+  description = "loki chart version. Matches scripts/mirror-images.sh."
+  type        = string
+  default     = "7.3.0"
+}
+
+variable "tempo_chart_version" {
+  description = <<-EOT
+    grafana/tempo (single-binary) chart version. Matches scripts/mirror-images.sh.
+
+    Single-binary rather than tempo-distributed: one pod instead of six, which
+    is what makes the stack fit on t3.medium. Both charts are deprecated
+    upstream; this one is a sixth of the footprint.
+  EOT
+  type        = string
+  default     = "1.24.4"
+}
+
+variable "lgtm_replication_factor" {
+  description = <<-EOT
+    Ingester replication factor shared by all three backends.
+
+    All three charts default to 3, which is also their MINIMUM ingester count —
+    left alone on a scaled-down cluster the ring never becomes healthy and every
+    write is refused, with no error at deploy time. 1 is the cost-sane demo
+    choice and means un-flushed data sits on exactly one ingester.
+  EOT
+  type        = number
+  default     = 1
+}
+
+variable "lgtm_ingester_replicas" {
+  description = "Ingester replicas per backend. Must be >= lgtm_replication_factor."
+  type        = number
+  default     = 2
+}
+
+variable "lgtm_enable_caches" {
+  description = <<-EOT
+    Deploy the memcached tiers. Off by default: Loki's chunksCache alone
+    requests 8192Mi, an entire t3.large, before Loki has started.
+  EOT
+  type        = bool
+  default     = false
+}

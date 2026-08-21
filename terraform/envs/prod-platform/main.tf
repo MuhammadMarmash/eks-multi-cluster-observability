@@ -6,6 +6,7 @@
 #   cert-manager        x1  -> Cluster B, issues the gateway certificate
 #   telemetry-gateway   x1  -> Cluster B, TLS + auth + fan-out
 #   telemetry-agent     x1  -> Cluster A, collects and ships
+#   lgtm-backends       x1  -> Cluster B, Mimir + Loki + Tempo on S3
 #
 # Modules never call each other. This file is the only place the two clusters
 # meet, and it is the only place that knows the gateway's name, CA and
@@ -15,6 +16,7 @@
 #   docs/adr/0006  Alloy as the unified agent
 #   docs/adr/0007  internal NLB plus a dual-associated private zone
 #   docs/adr/0008  two-stage Terraform
+#   docs/adr/0010  S3 object storage and the IRSA model that reaches it
 ###############################################################################
 
 ###############################################################################
@@ -156,4 +158,44 @@ module "agent" {
   image_tag        = var.alloy_image_tag
 
   scrape_interval = var.scrape_interval
+}
+
+###############################################################################
+# 5. THE BACKENDS — Cluster B
+#
+# Mimir, Loki and Tempo. Stateless: everything durable is in the S3 buckets
+# envs/prod created, reached through the IRSA roles it created alongside them.
+#
+# The bucket names, role ARNs and ServiceAccount names all come from that
+# state. The ServiceAccount names in particular are NOT chosen here — the trust
+# policies are pinned to them, and each chart's own default derives from the
+# Helm release name instead.
+#
+#   docs/adr/0010-cloud-native-storage-and-irsa.md
+###############################################################################
+
+module "lgtm_backends" {
+  source = "../../modules/lgtm-backends"
+
+  providers = {
+    helm       = helm.observability
+    kubernetes = kubernetes.observability
+  }
+
+  namespace  = data.terraform_remote_state.infra.outputs.lgtm_namespace
+  aws_region = var.aws_region
+
+  buckets        = data.terraform_remote_state.infra.outputs.lgtm_bucket_names
+  irsa_role_arns = data.terraform_remote_state.infra.outputs.lgtm_irsa_role_arns
+
+  chart_repository = local.chart_registry
+  image_registry   = local.registry
+
+  mimir_chart_version = var.mimir_chart_version
+  loki_chart_version  = var.loki_chart_version
+  tempo_chart_version = var.tempo_chart_version
+
+  replication_factor = var.lgtm_replication_factor
+  ingester_replicas  = var.lgtm_ingester_replicas
+  enable_caches      = var.lgtm_enable_caches
 }

@@ -115,14 +115,21 @@ variable "node_instance_types" {
   description = <<-EOT
     Instance types for both node groups.
 
-    t3.large (2 vCPU / 8 GiB) is specified for the LGTM stack: Mimir ingesters
-    and Loki are memory-hungry and t3.medium's 4 GiB leads to OOMKills under
-    any real ingest rate. Note that t3.large roughly doubles the compute bill
-    versus t3.medium — see the cost table in terraform/README.md before a
-    long-running apply.
+    t3.medium (2 vCPU / 4 GiB). Note that t3.medium and t3.large have the SAME
+    2 vCPU — the difference is memory only, so downsizing costs RAM and nothing
+    else.
+
+    The memory cost is larger than the raw numbers suggest. EKS reserves
+    `255Mi + 11Mi * max_pods`, and prefix delegation raises max_pods to 110, so
+    kube-reserved is 1465Mi PER NODE regardless of instance size. On a t3.large
+    that is 18% of memory; on a t3.medium it is 36%. Real allocatable is
+    ~2.37 GiB per t3.medium node, not 4.
+
+    That is why the observability node group runs three nodes rather than two —
+    see observability_node_desired_size.
   EOT
   type        = list(string)
-  default     = ["t3.large"]
+  default     = ["t3.medium"]
 }
 
 variable "node_desired_size" {
@@ -139,6 +146,38 @@ variable "node_min_size" {
 
 variable "node_max_size" {
   description = "Maximum node count per cluster."
+  type        = number
+  default     = 6
+}
+
+# --- Observability node group -------------------------------------------------
+#
+# Cluster B carries the whole LGTM stack plus the telemetry gateway, and its
+# memory demand is far higher than Cluster A's. These override the shared node
+# counts for that cluster only.
+
+variable "observability_node_desired_size" {
+  description = <<-EOT
+    Desired node count for Cluster B.
+
+    Three, not two. Two t3.medium nodes give 4.75 GiB of ALLOCATABLE memory once
+    kube-reserved is taken out, and the LGTM stack plus the gateway, cert-manager
+    and the load balancer controller do not fit in that. Three gives 7.12 GiB.
+
+    Three t3.medium nodes also cost less than the two t3.large they replace.
+  EOT
+  type        = number
+  default     = 3
+}
+
+variable "observability_node_min_size" {
+  description = "Minimum node count for Cluster B. Must not drop below what the LGTM stack needs to schedule."
+  type        = number
+  default     = 3
+}
+
+variable "observability_node_max_size" {
+  description = "Maximum node count for Cluster B."
   type        = number
   default     = 6
 }

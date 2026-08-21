@@ -37,6 +37,25 @@ output "telemetry_namespace" {
   value       = var.telemetry_namespace
 }
 
+# --- LGTM backends -------------------------------------------------------------
+
+# These are exactly what module.gateway's mimir_endpoint / loki_endpoint /
+# tempo_endpoint expect. Wiring them across and flipping lgtm_enabled is the
+# next step, deliberately left for its own change.
+output "lgtm_write_endpoints" {
+  description = "In-cluster OTLP write endpoints the gateway Alloy will fan out to."
+  value = {
+    mimir = module.lgtm_backends.mimir_otlp_endpoint
+    loki  = module.lgtm_backends.loki_otlp_endpoint
+    tempo = module.lgtm_backends.tempo_otlp_endpoint
+  }
+}
+
+output "lgtm_query_endpoints" {
+  description = "In-cluster read endpoints. Grafana's datasources point here."
+  value       = module.lgtm_backends.query_endpoints
+}
+
 # The runbook's checks, rendered with this deployment's actual names so they
 # can be copied and run without editing.
 output "verification" {
