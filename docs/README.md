@@ -16,6 +16,7 @@ the decision, what it costs us, and what was rejected.
 | [0007](adr/0007-cross-cluster-name-resolution.md) | Internal NLB plus a dual-associated private zone, over CoreDNS stub domains |
 | [0008](adr/0008-two-stage-terraform.md) | Two Terraform root modules — infrastructure, then the Kubernetes layer |
 | [0009](adr/0009-workload-application-source.md) | The workload app is the OTLP-instrumented Online Boutique fork, pinned by repository |
+| [0010](adr/0010-cloud-native-storage-and-irsa.md) | Three S3 buckets, three IRSA roles, SSE-S3, and per-signal lifecycle rules |
 
 ## Related
 
