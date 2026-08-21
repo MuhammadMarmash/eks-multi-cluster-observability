@@ -139,9 +139,15 @@ variable "loki_chart_version" {
 }
 
 variable "tempo_chart_version" {
-  description = "tempo-distributed chart version. Matches scripts/mirror-images.sh."
+  description = <<-EOT
+    grafana/tempo (single-binary) chart version. Matches scripts/mirror-images.sh.
+
+    Single-binary rather than tempo-distributed: one pod instead of six, which
+    is what makes the stack fit on t3.medium. Both charts are deprecated
+    upstream; this one is a sixth of the footprint.
+  EOT
   type        = string
-  default     = "1.61.3"
+  default     = "1.24.4"
 }
 
 variable "lgtm_replication_factor" {

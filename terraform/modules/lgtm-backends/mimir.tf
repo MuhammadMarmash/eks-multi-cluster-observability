@@ -71,45 +71,59 @@ locals {
     # --- read/write split.
     distributor = {
       replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
+      resources = { requests = { cpu = "100m", memory = "160Mi" }, limits = { memory = "320Mi" } }
     }
 
     ingester = {
       replicas = var.ingester_replicas
-      # Stateless by instruction: the WAL goes to emptyDir. The trade-off is
-      # real — a restarting ingester loses samples not yet flushed to a block.
-      # See the module's README note and ADR 0010.
-      persistentVolume     = { enabled = false }
+
+      # The ONE place a PVC is justified. This holds the write-ahead log, not
+      # durable storage — blocks still go to S3. Without it a restarting
+      # ingester loses every sample taken since its last block flush, up to two
+      # hours. It only ever holds one block period, so it stays small.
+      #
+      # whenDeleted defaults to Retain in this chart, which would leave EBS
+      # volumes billing after a destroy. Delete is safe precisely because this
+      # is not the durable copy.
+      persistentVolume = {
+        enabled = true
+        size    = var.ingester_wal_size
+        retentionPolicy = {
+          whenDeleted = "Delete"
+          whenScaled  = "Retain" # a scale-down must not drop an unflushed WAL
+        }
+      }
+
       zoneAwareReplication = { enabled = false }
-      resources            = { requests = { cpu = "200m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources            = { requests = { cpu = "150m", memory = "384Mi" }, limits = { memory = "768Mi" } }
     }
 
     querier = {
       replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
+      resources = { requests = { cpu = "100m", memory = "192Mi" }, limits = { memory = "384Mi" } }
     }
 
     query_frontend = {
       replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
+      resources = { requests = { cpu = "100m", memory = "160Mi" }, limits = { memory = "320Mi" } }
     }
 
     query_scheduler = {
       replicas  = 1
-      resources = { requests = { cpu = "50m", memory = "128Mi" }, limits = { memory = "256Mi" } }
+      resources = { requests = { cpu = "50m", memory = "96Mi" }, limits = { memory = "192Mi" } }
     }
 
     store_gateway = {
       replicas             = 1
       persistentVolume     = { enabled = false }
       zoneAwareReplication = { enabled = false }
-      resources            = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources            = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
     }
 
     compactor = {
       replicas         = 1
       persistentVolume = { enabled = false }
-      resources        = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources        = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
     }
 
     gateway = {

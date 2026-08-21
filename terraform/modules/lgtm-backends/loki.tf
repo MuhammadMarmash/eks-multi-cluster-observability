@@ -80,18 +80,18 @@ locals {
       # The key is volumeClaimsEnabled. `persistence.enabled` does not exist in
       # this chart and is silently ignored — the StatefulSet keeps its PVC.
       persistence = { volumeClaimsEnabled = false } # WAL only; chunks live in S3
-      resources   = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources   = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
     }
 
     read = {
       replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
     }
 
     backend = {
       replicas    = 1
       persistence = { volumeClaimsEnabled = false }
-      resources   = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
+      resources   = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
     }
 
     gateway = {

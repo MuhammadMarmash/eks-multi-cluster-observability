@@ -22,8 +22,8 @@ output "loki_otlp_endpoint" {
 }
 
 output "tempo_otlp_endpoint" {
-  description = "Tempo OTLP/gRPC ingest endpoint on the distributor, host:port."
-  value       = "tempo-distributor.${var.namespace}.svc.cluster.local:4317"
+  description = "Tempo OTLP/gRPC ingest endpoint, host:port. Single-binary chart, so this is the one Tempo Service."
+  value       = "tempo.${var.namespace}.svc.cluster.local:4317"
 }
 
 # --- Query endpoints, for Grafana's datasources in the next step --------------
@@ -33,7 +33,7 @@ output "query_endpoints" {
   value = {
     mimir = "http://mimir-query-frontend.${var.namespace}.svc.cluster.local:8080/prometheus"
     loki  = "http://loki-gateway.${var.namespace}.svc.cluster.local"
-    tempo = "http://tempo-query-frontend.${var.namespace}.svc.cluster.local:3100"
+    tempo = "http://tempo.${var.namespace}.svc.cluster.local:3100"
   }
 }
 

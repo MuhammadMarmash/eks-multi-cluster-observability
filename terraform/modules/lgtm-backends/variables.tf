@@ -82,9 +82,15 @@ variable "loki_chart_version" {
 }
 
 variable "tempo_chart_version" {
-  description = "tempo-distributed chart version. Matches scripts/mirror-images.sh."
+  description = <<-EOT
+    grafana/tempo (single-binary) chart version. Matches scripts/mirror-images.sh.
+
+    The single-binary chart, not tempo-distributed: one pod instead of six,
+    which is what makes the stack fit on t3.medium nodes. Both charts are
+    deprecated upstream; this one is a sixth of the footprint.
+  EOT
   type        = string
-  default     = "1.61.3"
+  default     = "1.24.4"
 }
 
 variable "mimir_image_tag" {
@@ -100,7 +106,7 @@ variable "loki_image_tag" {
 }
 
 variable "tempo_image_tag" {
-  description = "Tempo image tag (chart 1.61.3 appVersion)."
+  description = "Tempo image tag (chart 1.24.4 appVersion)."
   type        = string
   default     = "2.9.0"
 }
@@ -171,6 +177,19 @@ variable "enable_mimir_ruler_and_alertmanager" {
   EOT
   type        = bool
   default     = false
+}
+
+variable "ingester_wal_size" {
+  description = <<-EOT
+    Size of the Mimir ingester's write-ahead-log volume.
+
+    This is the one PVC in the stack, and it is NOT durable storage — blocks go
+    to S3. It exists so a restarting ingester does not lose every sample taken
+    since its last block flush, which is up to two hours. It only ever holds one
+    block period, so it stays small.
+  EOT
+  type        = string
+  default     = "2Gi"
 }
 
 variable "log_level" {

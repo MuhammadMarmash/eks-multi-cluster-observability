@@ -50,12 +50,12 @@ helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || t
 helm repo update >/dev/null 2>&1
 helm pull grafana/mimir-distributed --version "$MIMIR_V" --untar --untardir "$WORKDIR" >/dev/null
 helm pull grafana/loki              --version "$LOKI_V"  --untar --untardir "$WORKDIR" >/dev/null
-helm pull grafana/tempo-distributed --version "$TEMPO_V" --untar --untardir "$WORKDIR" >/dev/null
+helm pull grafana/tempo             --version "$TEMPO_V" --untar --untardir "$WORKDIR" >/dev/null
 
 ( cd "$MODULE" && terraform init -backend=false -input=false >/dev/null 2>&1 )
 
 fail=0
-for pair in "mimir:mimir-distributed" "loki:loki" "tempo:tempo-distributed"; do
+for pair in "mimir:mimir-distributed" "loki:loki" "tempo:tempo"; do
   component="${pair%%:*}"; chart="${pair##*:}"
 
   # Terraform renders the values, so this can never drift from what the module
@@ -88,6 +88,12 @@ python3 - "$WORKDIR" <<'PY'
 import sys, yaml, re
 wd = sys.argv[1]
 expect_sa = {"mimir": "mimir-sa", "loki": "loki-sa", "tempo": "tempo-sa"}
+
+# Exactly one volumeClaimTemplate is intended: the Mimir ingester's write-ahead
+# log. It is not durable storage — blocks go to S3 — but without it a restarting
+# ingester loses every sample since its last block flush. Anything else with a
+# PVC is a chart default that got past us.
+ALLOWED_PVC = {"mimir-ingester"}
 problems = []
 totals = {"pods": 0, "cpu": 0.0, "mem": 0}
 
@@ -119,8 +125,8 @@ for c, want_sa in expect_sa.items():
             problems.append(f"{c}: standalone PVC rendered ({name})")
         if d["kind"] not in ("Deployment", "StatefulSet"):
             continue
-        if d["spec"].get("volumeClaimTemplates"):
-            problems.append(f"{c}: {name} still has a volumeClaimTemplate")
+        if d["spec"].get("volumeClaimTemplates") and name not in ALLOWED_PVC:
+            problems.append(f"{c}: {name} has an unexpected volumeClaimTemplate")
         reps = d["spec"].get("replicas", 1) or 1
         totals["pods"] += reps
         for ct in d["spec"]["template"]["spec"]["containers"]:
@@ -128,14 +134,36 @@ for c, want_sa in expect_sa.items():
             totals["cpu"] += cpu(r.get("cpu")) * reps
             totals["mem"] += mem(r.get("memory")) * reps
 
+# Confirm the one PVC we DO want is actually there — losing it silently would
+# reintroduce the two-hour data-loss window this was added to close.
+mimir_docs = [d for d in yaml.safe_load_all(open(f"{wd}/mimir-rendered.yaml")) if isinstance(d, dict)]
+if not any(d.get("kind") == "StatefulSet"
+           and d["metadata"]["name"] == "mimir-ingester"
+           and d["spec"].get("volumeClaimTemplates")
+           for d in mimir_docs):
+    problems.append("mimir-ingester has NO WAL volume; a restart would lose everything since the last flush")
+
 for p in problems:
     print(f"  \033[31mFAIL\033[0m {p}")
 
 print(f"\n  footprint: {totals['pods']} pods, "
       f"{totals['cpu']:.2f} vCPU, {totals['mem']/1024:.2f} GiB requested")
 # 2 x t3.large allocatable, after kubelet and system reservations.
-print(f"  against 2 x t3.large (~3.86 vCPU / ~13.4 GiB allocatable): "
-      f"CPU {totals['cpu']/3.86*100:.0f}%, MEM {totals['mem']/1024/13.4*100:.0f}%")
+# Cluster B: 3 x t3.medium. EKS reserves 255Mi + 11Mi*max_pods per node, and
+# prefix delegation puts max_pods at 110, so kube-reserved is 1465Mi per node
+# whatever the instance size. Allocatable is 2.37 GiB/node, not 4.
+NODES, PER_NODE_MEM_GIB, PER_NODE_CPU = 3, 2.373, 1.930
+cap_m, cap_c = NODES*PER_NODE_MEM_GIB, NODES*PER_NODE_CPU
+used_m = totals['mem']/1024
+print(f"  against {NODES} x t3.medium ({cap_c:.2f} vCPU / {cap_m:.2f} GiB allocatable): "
+      f"CPU {totals['cpu']/cap_c*100:.0f}%, MEM {used_m/cap_m*100:.0f}%")
+# The gateway, cert-manager, the LB controller and the system DaemonSets also
+# have to fit. Measured headroom, not a guess.
+PLATFORM_GIB, PLATFORM_CPU = 2.0, 0.8
+print(f"  + platform/system (~{PLATFORM_CPU} vCPU / ~{PLATFORM_GIB} GiB): "
+      f"CPU {(totals['cpu']+PLATFORM_CPU)/cap_c*100:.0f}%, MEM {(used_m+PLATFORM_GIB)/cap_m*100:.0f}%")
+if used_m + PLATFORM_GIB > cap_m:
+    problems.append(f"stack does not fit: {used_m+PLATFORM_GIB:.2f} GiB needed vs {cap_m:.2f} GiB allocatable")
 
 sys.exit(1 if problems else 0)
 PY

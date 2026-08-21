@@ -145,9 +145,12 @@ module "eks_observability" {
 
   node_group_name     = "observability"
   node_instance_types = var.node_instance_types
-  node_desired_size   = var.node_desired_size
-  node_min_size       = var.node_min_size
-  node_max_size       = var.node_max_size
+
+  # Cluster B carries the LGTM stack; it needs more nodes than Cluster A.
+  # See observability_node_desired_size for the allocatable-memory arithmetic.
+  node_desired_size = var.observability_node_desired_size
+  node_min_size     = var.observability_node_min_size
+  node_max_size     = var.observability_node_max_size
 
   node_labels = {
     "workload-type" = "observability"

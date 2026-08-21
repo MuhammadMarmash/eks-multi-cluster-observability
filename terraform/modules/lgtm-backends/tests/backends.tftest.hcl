@@ -81,9 +81,11 @@ run "bundled_object_storage_is_off" {
     error_message = "Loki's bundled MinIO must be disabled."
   }
 
+  # The single-binary tempo chart bundles no object store at all, so the
+  # assertion that matters is that its backend is not the default local disk.
   assert {
-    condition     = output.tempo_values.minio.enabled == false
-    error_message = "Tempo's bundled MinIO must be disabled."
+    condition     = output.tempo_values.tempo.storage.trace.backend != "local"
+    error_message = "Tempo must not use the default local-disk backend."
   }
 }
 
@@ -107,12 +109,12 @@ run "every_backend_writes_to_its_own_s3_bucket" {
 
   # Default is "local" — a node disk. Left alone, every trace dies with the pod.
   assert {
-    condition     = output.tempo_values.storage.trace.backend == "s3"
+    condition     = output.tempo_values.tempo.storage.trace.backend == "s3"
     error_message = "Tempo's trace backend must be s3, not the default local disk."
   }
 
   assert {
-    condition     = output.tempo_values.storage.trace.s3.bucket == "obs-platform-prod-tempo-123456789012"
+    condition     = output.tempo_values.tempo.storage.trace.s3.bucket == "obs-platform-prod-tempo-123456789012"
     error_message = "Tempo blocks must land in the Tempo bucket."
   }
 }
@@ -176,17 +178,31 @@ run "replication_factor_is_satisfiable_by_the_ingester_count" {
   }
 
   assert {
-    condition     = output.tempo_values.ingester.config.replication_factor <= output.tempo_values.ingester.replicas
-    error_message = "Tempo: replication_factor exceeds ingester replicas."
+    condition     = output.tempo_values.replicas == 1
+    error_message = "Tempo runs single-binary; replication factor does not apply."
   }
 }
 
 run "no_local_persistent_volumes" {
   command = plan
 
+  # The ONE justified PVC. It holds the write-ahead log, not durable data —
+  # without it a restarting ingester loses up to two hours of samples.
   assert {
-    condition     = output.mimir_values.ingester.persistentVolume.enabled == false
-    error_message = "Mimir ingester must not claim a PV; durable data lives in S3."
+    condition     = output.mimir_values.ingester.persistentVolume.enabled == true
+    error_message = "Mimir's ingester needs a WAL volume; without it a restart loses everything since the last block flush."
+  }
+
+  # The chart defaults whenDeleted to Retain, which leaves EBS volumes billing
+  # after a destroy. Safe to delete precisely because this is not the durable copy.
+  assert {
+    condition     = output.mimir_values.ingester.persistentVolume.retentionPolicy.whenDeleted == "Delete"
+    error_message = "The WAL volume must be reclaimed on uninstall; the chart default of Retain orphans EBS volumes."
+  }
+
+  assert {
+    condition     = output.mimir_values.ingester.persistentVolume.retentionPolicy.whenScaled == "Retain"
+    error_message = "A scale-down must not discard an unflushed WAL."
   }
 
   assert {
@@ -214,8 +230,8 @@ run "no_local_persistent_volumes" {
   }
 
   assert {
-    condition     = output.tempo_values.ingester.persistence.enabled == false
-    error_message = "Tempo ingester must not claim a PV."
+    condition     = output.tempo_values.persistence.enabled == false
+    error_message = "Tempo must not claim a PV; blocks live in S3 and the WAL is scratch."
   }
 }
 
@@ -230,8 +246,8 @@ run "memory_hungry_caches_are_off_by_default" {
   }
 
   assert {
-    condition     = output.tempo_values.memcached.enabled == false
-    error_message = "Tempo's memcached ships enabled and must be turned off."
+    condition     = output.tempo_values.tempoQuery.enabled == false
+    error_message = "The standalone Tempo query UI is redundant beside Grafana and costs a pod."
   }
 }
 

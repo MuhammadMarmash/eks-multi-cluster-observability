@@ -1,19 +1,57 @@
 ###############################################################################
 # Tempo — traces
 #
-# tempo-distributed. Receives OTLP from the gateway Alloy and writes blocks
-# straight to S3.
+# The SINGLE-BINARY chart, not tempo-distributed. One pod instead of six,
+# reclaiming roughly 0.7 vCPU and 2 GiB — which is what makes the stack fit on
+# t3.medium nodes at all.
+#
+# Both Tempo charts are marked `deprecated: true` upstream, so the swap buys
+# compute rather than support. appVersion 2.9.0 is current in both.
+#
+# Trace volume from one Boutique deployment does not need a distributed read
+# path; the ingest path is identical either way, and blocks land in the same S3
+# bucket through the same IRSA role.
 ###############################################################################
 
 locals {
   tempo_values = {
+    replicas = 1
+
     tempo = {
-      image = {
-        registry   = var.image_registry
-        repository = "mirror/grafana/tempo"
-        tag        = var.tempo_image_tag
+      repository = "${var.image_registry}/mirror/grafana/tempo"
+      tag        = var.tempo_image_tag
+
+      storage = {
+        trace = {
+          # Default is "local" — a node disk. Left alone every trace dies with
+          # the pod, and nothing about the deployment looks wrong.
+          backend = "s3"
+          s3 = {
+            bucket   = var.buckets["tempo"]
+            region   = var.aws_region
+            endpoint = local.s3_endpoint
+            # No access_key / secret_key: IRSA supplies the credential, and
+            # setting one here would disable it rather than supplement it.
+          }
+          # Scratch only. Blocks are flushed to S3; this is the staging area.
+          wal = { path = "/var/tempo/wal" }
+        }
       }
-      logLevel = var.log_level
+
+      # The gateway Alloy pushes OTLP here over gRPC.
+      receivers = {
+        otlp = {
+          protocols = {
+            grpc = { endpoint = "0.0.0.0:4317" }
+            http = { endpoint = "0.0.0.0:4318" }
+          }
+        }
+      }
+
+      resources = {
+        requests = { cpu = "100m", memory = "320Mi" }
+        limits   = { memory = "640Mi" }
+      }
     }
 
     serviceAccount = {
@@ -22,64 +60,12 @@ locals {
       annotations = local.service_account_annotations["tempo"]
     }
 
-    storage = {
-      trace = {
-        # Default is "local" — a node disk. Left alone, every trace is lost
-        # with the pod and nothing about the deployment looks wrong.
-        backend = "s3"
-        s3 = {
-          bucket   = var.buckets["tempo"]
-          region   = var.aws_region
-          endpoint = local.s3_endpoint
-          # No access_key / secret_key: IRSA supplies the credential.
-        }
-      }
-    }
+    # Durable data is in S3. The WAL is scratch and lives in emptyDir: a Tempo
+    # restart re-reads from S3, and the window of un-flushed traces is minutes.
+    persistence = { enabled = false }
 
-    # --- Topology
-    distributor = {
-      replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
-
-      # The gateway Alloy in the telemetry namespace pushes OTLP here.
-      config = {
-        log_received_spans = { enabled = false }
-      }
-    }
-
-    ingester = {
-      replicas    = var.ingester_replicas
-      persistence = { enabled = false }
-      config = {
-        replication_factor = var.replication_factor
-      }
-      resources = { requests = { cpu = "150m", memory = "512Mi" }, limits = { memory = "1Gi" } }
-    }
-
-    querier = {
-      replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
-    }
-
-    queryFrontend = {
-      replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "256Mi" }, limits = { memory = "512Mi" } }
-    }
-
-    compactor = {
-      replicas  = 1
-      resources = { requests = { cpu = "100m", memory = "512Mi" }, limits = { memory = "1Gi" } }
-    }
-
-    # memcached ships ENABLED in this chart.
-    memcached = { enabled = var.enable_caches }
-
-    # The gateway Alloy already fronts ingest; a second nginx adds a pod and a
-    # hop for nothing.
-    gateway          = { enabled = false }
-    metricsGenerator = { enabled = false }
-    metaMonitoring   = { grafanaAgent = { enabled = false } }
-    minio            = { enabled = false }
+    # A second query UI alongside Grafana would be a pod for nothing.
+    tempoQuery = { enabled = false }
   }
 }
 
@@ -87,7 +73,7 @@ resource "helm_release" "tempo" {
   name             = "tempo"
   namespace        = kubernetes_namespace_v1.this.metadata[0].name
   repository       = var.chart_repository
-  chart            = "tempo-distributed"
+  chart            = "tempo"
   version          = var.tempo_chart_version
   create_namespace = false
 
