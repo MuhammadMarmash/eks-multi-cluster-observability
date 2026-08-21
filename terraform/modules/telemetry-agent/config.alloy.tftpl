@@ -1,0 +1,326 @@
+// Agent Alloy — Cluster A.
+//
+// Collects all three signals and converts them to OTLP in-process, so
+// everything leaves this cluster on ONE authenticated connection to the
+// gateway. ADR 0002 opens exactly two ports across the peering link; nothing
+// here may talk to Loki, Mimir or Tempo directly.
+//
+// Rendered by terraform/modules/telemetry-agent. Do not edit in the cluster.
+
+logging {
+  level  = "${log_level}"
+  format = "logfmt"
+}
+
+// ---------------------------------------------------------------------------
+// 1. Traces and application metrics from the instrumented workloads.
+//    Cluster-local and plaintext: the peering link is the trust boundary, not
+//    the pod network inside a single cluster.
+// ---------------------------------------------------------------------------
+
+otelcol.receiver.otlp "apps" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.k8sattributes.apps.input]
+    logs    = [otelcol.processor.k8sattributes.apps.input]
+    traces  = [otelcol.processor.k8sattributes.apps.input]
+  }
+}
+
+// Enriches whatever the application sent with the pod, namespace and workload
+// it came from, so a span can be traced back to a Deployment without the
+// application having to know its own coordinates.
+otelcol.processor.k8sattributes "apps" {
+  extract {
+    metadata = [
+      "k8s.namespace.name",
+      "k8s.pod.name",
+      "k8s.pod.uid",
+      "k8s.deployment.name",
+      "k8s.node.name",
+      "k8s.container.name",
+    ]
+  }
+
+  pod_association {
+    source {
+      from = "resource_attribute"
+      name = "k8s.pod.ip"
+    }
+  }
+
+  pod_association {
+    source {
+      from = "connection"
+    }
+  }
+
+  output {
+    metrics = [otelcol.processor.transform.stamp.input]
+    logs    = [otelcol.processor.transform.stamp.input]
+    traces  = [otelcol.processor.transform.stamp.input]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2. Infrastructure metrics — the kubelet and cAdvisor on THIS node only.
+// ---------------------------------------------------------------------------
+
+discovery.kubernetes "local_node" {
+  role = "node"
+
+  selectors {
+    role  = "node"
+    field = "metadata.name=" + sys.env("NODE_NAME")
+  }
+}
+
+discovery.relabel "kubelet" {
+  targets = discovery.kubernetes.local_node.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+    action        = "replace"
+    target_label  = "__address__"
+    replacement   = "$1:10250"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_node_name"]
+    action        = "replace"
+    target_label  = "node"
+  }
+}
+
+// The kubelet's own metrics: pod lifecycle, volume stats, runtime health.
+prometheus.scrape "kubelet" {
+  targets         = discovery.relabel.kubelet.output
+  scheme          = "https"
+  metrics_path    = "/metrics"
+  scrape_interval = "${scrape_interval}"
+
+  bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+  tls_config {
+    // The kubelet serves a certificate signed by a per-node CA that the
+    // ServiceAccount bundle does not contain. This is a hop to the node's own
+    // address on its own network and is unrelated to the cross-cluster
+    // connection, which verifies its CA properly.
+    insecure_skip_verify = true
+  }
+
+  forward_to = [prometheus.relabel.infra.receiver]
+}
+
+// cAdvisor: per-container CPU, memory, network and filesystem. A separate
+// path on the same endpoint — omitting it loses all container-level usage.
+prometheus.scrape "cadvisor" {
+  targets         = discovery.relabel.kubelet.output
+  scheme          = "https"
+  metrics_path    = "/metrics/cadvisor"
+  scrape_interval = "${scrape_interval}"
+
+  bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+  tls_config {
+    insecure_skip_verify = true
+  }
+
+  forward_to = [prometheus.relabel.infra.receiver]
+}
+
+prometheus.relabel "infra" {
+  rule {
+    action       = "replace"
+    target_label = "cluster"
+    replacement  = "${cluster_name}"
+  }
+
+  forward_to = [otelcol.receiver.prometheus.infra.receiver]
+}
+
+// Bridges the Prometheus ecosystem into OTLP so infrastructure metrics leave
+// on the same connection as everything else.
+otelcol.receiver.prometheus "infra" {
+  output {
+    metrics = [otelcol.processor.transform.stamp.input]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Pod logs from THIS node.
+// ---------------------------------------------------------------------------
+
+discovery.kubernetes "local_pods" {
+  role = "pod"
+
+  selectors {
+    role  = "pod"
+    field = "spec.nodeName=" + sys.env("NODE_NAME")
+  }
+}
+
+discovery.relabel "pod_logs" {
+  targets = discovery.kubernetes.local_pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    action        = "replace"
+    target_label  = "namespace"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    action        = "replace"
+    target_label  = "pod"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    action        = "replace"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+    action        = "replace"
+    target_label  = "app"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+    action        = "replace"
+    target_label  = "job"
+    separator     = "/"
+    replacement   = "$1"
+  }
+
+  // The container runtime writes to a path keyed by pod UID and container
+  // name. This is what turns a discovered pod into a file to tail.
+  rule {
+    source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+    action        = "replace"
+    target_label  = "__path__"
+    separator     = "/"
+    replacement   = "/var/log/pods/*$1/*.log"
+  }
+}
+
+local.file_match "pod_logs" {
+  path_targets = discovery.relabel.pod_logs.output
+}
+
+loki.source.file "pod_logs" {
+  targets    = local.file_match.pod_logs.targets
+  forward_to = [loki.process.pod_logs.receiver]
+}
+
+loki.process "pod_logs" {
+  // Container logs are CRI-formatted: timestamp, stream, tag, then the line.
+  // Without this the whole envelope becomes the log body.
+  stage.cri {}
+
+  stage.static_labels {
+    values = {
+      cluster = "${cluster_name}",
+    }
+  }
+
+  forward_to = [otelcol.receiver.loki.pod_logs.receiver]
+}
+
+// Bridges Loki streams into OTLP.
+otelcol.receiver.loki "pod_logs" {
+  output {
+    logs = [otelcol.processor.transform.stamp.input]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Common tail — stamp, limit, batch, export.
+// ---------------------------------------------------------------------------
+
+// Stamps the origin cluster as a RESOURCE attribute on every signal. This is
+// what lets a Grafana panel in Cluster B prove that a span or a sample came
+// from Cluster A, which is the project's Proof of Life requirement.
+otelcol.processor.transform "stamp" {
+  error_mode = "ignore"
+
+  trace_statements {
+    context    = "resource"
+    statements = ["set(attributes[\"cluster\"], \"${cluster_name}\")"]
+  }
+
+  metric_statements {
+    context    = "resource"
+    statements = ["set(attributes[\"cluster\"], \"${cluster_name}\")"]
+  }
+
+  log_statements {
+    context    = "resource"
+    statements = ["set(attributes[\"cluster\"], \"${cluster_name}\")"]
+  }
+
+  output {
+    metrics = [otelcol.processor.memory_limiter.default.input]
+    logs    = [otelcol.processor.memory_limiter.default.input]
+    traces  = [otelcol.processor.memory_limiter.default.input]
+  }
+}
+
+// A gateway outage must shed load, not OOM-kill the DaemonSet. A killed agent
+// takes its file-tail offsets with it and re-reads on restart.
+otelcol.processor.memory_limiter "default" {
+  check_interval = "1s"
+  limit          = "${memory_limit}"
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  send_batch_size     = 8192
+  send_batch_max_size = 16384
+  timeout             = "5s"
+
+  output {
+    metrics = [otelcol.exporter.otlp.gateway.input]
+    logs    = [otelcol.exporter.otlp.gateway.input]
+    traces  = [otelcol.exporter.otlp.gateway.input]
+  }
+}
+
+otelcol.auth.basic "gateway" {
+  username = sys.env("INGEST_USERNAME")
+  password = sys.env("INGEST_PASSWORD")
+}
+
+// The one hop that leaves this cluster. Verified against the CA that Terraform
+// copied out of Cluster B, so verification is real rather than skipped.
+otelcol.exporter.otlp "gateway" {
+  client {
+    endpoint = "${gateway_endpoint}"
+    auth     = otelcol.auth.basic.gateway.handler
+
+    tls {
+      ca_file = "${ca_file_path}"
+    }
+  }
+
+  retry_on_failure {
+    enabled          = true
+    initial_interval = "5s"
+    max_interval     = "30s"
+    max_elapsed_time = "5m"
+  }
+}
