@@ -21,5 +21,6 @@ the decision, what it costs us, and what was rejected.
 ## Related
 
 - [`RUNBOOK-telemetry.md`](RUNBOOK-telemetry.md) — deploy, verify and troubleshoot the telemetry pipeline
+- [`runbooks/day-2-ops.md`](runbooks/day-2-ops.md) — EKS upgrades and Mimir ingester autoscaling
 - [`../terraform/README.md`](../terraform/README.md) — module layout, runbook, cost table
 - [`../FINAL_PROJECT_MISSION.md`](../FINAL_PROJECT_MISSION.md) — the original brief
