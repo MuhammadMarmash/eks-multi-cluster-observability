@@ -1,0 +1,154 @@
+###############################################################################
+# ci.yaml — everything that can be checked without touching AWS, plus an
+# infrastructure plan when credentials are available.
+#
+# Deliberately does NOT mirror images or plan the Kubernetes layer. See
+# deploy.yaml for why those two are inseparable.
+###############################################################################
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main # main is deploy.yaml's trigger; running both would double-lock the state
+
+# Least privilege by default; jobs opt in to what they need.
+permissions: {}
+
+env:
+  # Pinning avoids a Terraform minor release changing plan output mid-review.
+  TF_VERSION: "1.15.8"
+  HELM_VERSION: "v3.16.4"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # No credentials, no OIDC. This is the job that still runs on a fork PR, and
+  # it is most of the value: 64 assertions, three chart renders and a real Alloy
+  # binary parsing every rendered config.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Lint, validate and test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          # The wrapper rewrites stdout, which breaks `terraform console` in
+          # the chart-render scripts.
+          terraform_wrapper: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Check formatting
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Validate every root module
+        run: cd terraform && make validate
+
+      - name: Run module tests
+        # terraform test with mock_provider — no AWS account required.
+        run: cd terraform && make test
+
+      - name: Render and check the certificate chart
+        run: ./charts/telemetry-certs/test.sh
+
+      - name: Check the mirror script parses
+        run: bash -n scripts/mirror-images.sh
+
+      # Catches what no values assertion can: a misspelled Alloy argument or a
+      # component below the configured stability level. Both survive plan,
+      # helm template and helm install, and surface as CrashLoopBackOff.
+      - name: Validate Alloy configs against the real binary
+        run: ./scripts/validate-alloy-configs.sh
+
+      # Renders the LGTM values against the upstream charts. This is what has
+      # caught a bundled Kafka StatefulSet and a silently-ignored persistence
+      # key. Charts come from upstream here because this is development time,
+      # not deploy time — ADR 0005 governs what a CLUSTER pulls.
+      - name: Render LGTM values against the real charts
+        run: ./scripts/validate-lgtm-values.sh
+
+  # ---------------------------------------------------------------------------
+  # Needs OIDC, so it cannot run on a fork PR — GitHub does not issue an
+  # id-token to a workflow triggered from a fork. Skipped rather than failed.
+  # ---------------------------------------------------------------------------
+  plan-infra:
+    name: Plan infrastructure
+    needs: validate
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token
+      pull-requests: write # post the plan summary
+    # A plan takes the state lock, so it must not race an apply.
+    concurrency:
+      group: terraform-prod-state
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # No access keys anywhere. A short-lived token, exchanged for a read-only
+      # role that can plan and take the state lock and nothing else.
+      - name: Assume the read-only plan role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_PLAN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-plan-infra-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      - name: Plan
+        id: plan
+        working-directory: terraform/envs/prod
+        # -detailed-exitcode: 0 no changes, 1 error, 2 changes pending.
+        run: |
+          set +e
+          terraform plan -input=false -lock-timeout=5m -no-color -detailed-exitcode > plan.txt 2>&1
+          code=$?
+          set -e
+          echo "exitcode=${code}" >> "$GITHUB_OUTPUT"
+          tail -c 60000 plan.txt
+          [ "$code" -ne 1 ]
+
+      # The full plan is NOT uploaded as an artifact. A saved plan holds secrets
+      # in plaintext — the gateway ingest credential and the Grafana admin
+      # password among them — and an artifact is downloadable by anyone with
+      # repo read. Only the human-readable summary is published.
+      - name: Publish the plan summary
+        if: always()
+        working-directory: terraform/envs/prod
+        run: |
+          {
+            echo "## Infrastructure plan"
+            echo
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

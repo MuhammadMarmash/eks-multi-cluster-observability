@@ -1,0 +1,293 @@
+###############################################################################
+# deploy.yaml — the gated deployment path.
+#
+# Strictly serial, and every edge is a real dependency:
+#
+#   apply-infra -> mirror         ECR repositories do not exist until infra applies
+#   mirror -> plan-platform       helm_release RESOLVES THE CHART AT PLAN TIME, so an
+#                                 unmirrored chart fails the plan, not just the apply
+#   plan-platform -> apply-platform
+#                                 the helm and kubernetes providers configure
+#                                 themselves from clusters that must already exist
+#
+# The apply jobs run in GitHub Environments with required reviewers. That is not
+# only a workflow gate: the apply role's IAM trust policy pins
+# `repo:OWNER/REPO:environment:<name>`, so AWS refuses to issue credentials to a
+# job that did not pass the gate. A workflow edited to skip the environment
+# cannot apply anything.
+#
+# No tfplan artifact is passed between plan and apply. A saved plan contains
+# secrets in plaintext and an artifact is readable by anyone with repo access,
+# so the apply job re-plans. The concurrency group below is what keeps that
+# honest — nothing else can touch the state between the two.
+###############################################################################
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_mirror:
+        description: "Skip the ECR mirror step (only when no chart or image version changed)"
+        type: boolean
+        default: false
+
+permissions: {}
+
+# One deployment at a time, and never cancelled mid-apply: an interrupted apply
+# leaves the state lock held and, worse, resources half-created.
+concurrency:
+  group: terraform-prod-deploy
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.15.8"
+  HELM_VERSION: "v3.16.4"
+
+jobs:
+  validate:
+    name: Lint, validate and test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - run: terraform -chdir=terraform fmt -check -recursive
+      - run: cd terraform && make validate
+      - run: cd terraform && make test
+      - run: ./charts/telemetry-certs/test.sh
+      - run: ./scripts/validate-alloy-configs.sh
+      - run: ./scripts/validate-lgtm-values.sh
+
+  # ---------------------------------------------------------------------------
+  # 1. INFRASTRUCTURE
+  # ---------------------------------------------------------------------------
+  plan-infra:
+    name: Plan infrastructure
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the read-only plan role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_PLAN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-plan-infra-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      - name: Plan
+        working-directory: terraform/envs/prod
+        run: |
+          terraform plan -input=false -lock-timeout=5m -no-color | tee plan.txt
+          {
+            echo "## Infrastructure plan"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply-infra:
+    name: Apply infrastructure
+    needs: plan-infra
+    runs-on: ubuntu-24.04
+    # The gate. Required reviewers are configured on the Environment, and the
+    # apply role's trust policy pins this exact name.
+    environment: prod-infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_APPLY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-apply-infra-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      # Re-plans rather than consuming an artifact. The plan is printed here in
+      # full before it is applied, so the log is the record of what happened.
+      - name: Apply
+        working-directory: terraform/envs/prod
+        run: terraform apply -input=false -auto-approve -lock-timeout=5m
+
+  # ---------------------------------------------------------------------------
+  # 2. MIRROR — ADR 0005
+  #
+  # Runs only here, never on a pull request. scripts/mirror-images.sh is
+  # in-tree, so allowing it from an untrusted branch would let a pull request
+  # decide what gets pushed into the registry both clusters pull from.
+  # ---------------------------------------------------------------------------
+  mirror:
+    name: Mirror charts and images into ECR
+    needs: apply-infra
+    if: ${{ !inputs.skip_mirror }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Assume the registry push role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ECR_PUSH }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-mirror-${{ github.run_id }}
+
+      # Idempotent against the IMMUTABLE tag policy: anything already in ECR is
+      # skipped rather than re-pushed, so a re-run after a partial failure is
+      # safe.
+      - name: Mirror
+        run: ./scripts/mirror-images.sh
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+
+  # ---------------------------------------------------------------------------
+  # 3. KUBERNETES LAYER
+  # ---------------------------------------------------------------------------
+  plan-platform:
+    name: Plan the Kubernetes layer
+    # `always()` plus an explicit result check, so a skipped mirror (the
+    # skip_mirror input) does not skip this too.
+    needs: [apply-infra, mirror]
+    if: always() && needs.apply-infra.result == 'success' && needs.mirror.result != 'failure'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # The plan role must also be listed in cluster_admin_role_arns, or the
+      # kubernetes and helm providers cannot reach the API server.
+      - name: Assume the read-only plan role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_PLAN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-plan-platform-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod-platform
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      - name: Plan
+        working-directory: terraform/envs/prod-platform
+        run: |
+          terraform plan -input=false -lock-timeout=5m -no-color \
+            -var="infra_state_bucket=${{ vars.TF_STATE_BUCKET }}" | tee plan.txt
+          {
+            echo "## Kubernetes layer plan"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply-platform:
+    name: Apply the Kubernetes layer
+    needs: plan-platform
+    runs-on: ubuntu-24.04
+    environment: prod-platform
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_APPLY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-apply-platform-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod-platform
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      # cert-manager has to issue before the CA secret is read, and the NLB
+      # takes minutes to provision, so this is the slow one.
+      - name: Apply
+        working-directory: terraform/envs/prod-platform
+        timeout-minutes: 45
+        run: |
+          terraform apply -input=false -auto-approve -lock-timeout=5m \
+            -var="infra_state_bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      # Rendered with this deployment's real names, so an operator can copy them
+      # straight out of the run summary.
+      - name: Publish the verification commands
+        working-directory: terraform/envs/prod-platform
+        run: |
+          {
+            echo "## Verify the pipeline"
+            echo
+            terraform output -json verification \
+              | jq -r 'to_entries|sort_by(.key)|.[]|"\(.key)\n```\n\(.value)\n```\n"'
+          } >> "$GITHUB_STEP_SUMMARY"

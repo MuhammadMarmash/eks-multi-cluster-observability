@@ -21,6 +21,13 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+
+    # Reads GitHub's OIDC certificate so the provider thumbprint is discovered
+    # rather than pinned to a literal that rotates.
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }
 

@@ -3,3 +3,14 @@ aws_region               = "eu-west-1"
 project                  = "obs-platform"
 state_bucket_name        = "obs-platform-tfstate-CHANGE-ME-ACCOUNT-ID"
 use_customer_managed_key = true
+
+# --- GitHub Actions OIDC -------------------------------------------------------
+# Exact "owner/repo". A wildcard would let any repository in the organisation
+# assume the CI roles. Leave empty to skip creating them.
+github_repository = "your-org/devops-project3"
+
+# These names are pinned in the apply role's trust policy AND used as the
+# `environment:` of the apply jobs. They must match, or the apply job cannot
+# obtain credentials at all.
+infra_environment_name    = "prod-infra"
+platform_environment_name = "prod-platform"

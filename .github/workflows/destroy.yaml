@@ -1,0 +1,150 @@
+###############################################################################
+# destroy.yaml — manual teardown, in the order that does not wedge the state.
+#
+# The Kubernetes layer MUST go first. Its providers configure themselves from
+# the clusters; once those are gone the platform state can no longer be read or
+# cleaned up without manual surgery.
+#
+# There is deliberately NO schedule here. A cron teardown would eventually fire
+# the night before a demo. Tearing down between test runs is the operator's
+# call, and the runbook says so.
+#
+# Expect this to FAIL on the S3 buckets, and that is correct: ADR 0010 sets
+# force_destroy = false on the LGTM object stores, so a destroy stops rather
+# than silently deleting the telemetry it is there to keep. Emptying them is a
+# deliberate administrative act.
+###############################################################################
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "What to destroy"
+        type: choice
+        required: true
+        default: platform-only
+        options:
+          - platform-only # reclaims the NLB and the LGTM stack; keeps the clusters
+          - everything # clusters, VPCs, buckets — the whole platform
+      confirm:
+        description: 'Type the word DESTROY to confirm. Anything else aborts.'
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: terraform-prod-deploy # the same group as deploy.yaml — never both at once
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.15.8"
+
+jobs:
+  # A typed confirmation, not just a button. workflow_dispatch is one misclick
+  # away from a production teardown otherwise.
+  guard:
+    name: Confirm intent
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the confirmation string
+        run: |
+          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+            echo "::error::Confirmation string did not match. Nothing was destroyed."
+            exit 1
+          fi
+          echo "Confirmed: scope=${{ inputs.scope }}"
+
+  destroy-platform:
+    name: Destroy the Kubernetes layer
+    needs: guard
+    runs-on: ubuntu-24.04
+    environment: prod-platform
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_APPLY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-destroy-platform-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod-platform
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      # Reclaims the internal NLB, which is the only hourly charge this layer
+      # adds on top of the clusters.
+      - name: Destroy
+        working-directory: terraform/envs/prod-platform
+        timeout-minutes: 45
+        run: |
+          terraform destroy -input=false -auto-approve -lock-timeout=5m \
+            -var="infra_state_bucket=${{ vars.TF_STATE_BUCKET }}"
+
+  destroy-infra:
+    name: Destroy infrastructure
+    needs: destroy-platform
+    if: inputs.scope == 'everything'
+    runs-on: ubuntu-24.04
+    environment: prod-infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_APPLY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-destroy-infra-${{ github.run_id }}
+
+      - name: Init
+        working-directory: terraform/envs/prod
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            ${KMS_ARG}
+        env:
+          KMS_ARG: ${{ vars.TF_STATE_KMS_KEY && format('-backend-config=kms_key_id={0}', vars.TF_STATE_KMS_KEY) || '' }}
+
+      # This will stop on any non-empty LGTM bucket. That is ADR 0010 working as
+      # designed, not a pipeline bug — see the note at the top of this file.
+      - name: Destroy
+        working-directory: terraform/envs/prod
+        timeout-minutes: 60
+        run: terraform destroy -input=false -auto-approve -lock-timeout=5m
+
+      - name: Explain a bucket-related failure
+        if: failure()
+        run: |
+          {
+            echo "## Destroy stopped"
+            echo
+            echo "If this failed on a non-empty S3 bucket, that is deliberate."
+            echo "ADR 0010 sets \`force_destroy = false\` on the Mimir, Loki and"
+            echo "Tempo buckets so a teardown cannot silently delete telemetry."
+            echo "Empty them explicitly, then re-run."
+          } >> "$GITHUB_STEP_SUMMARY"
