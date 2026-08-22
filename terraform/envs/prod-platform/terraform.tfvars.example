@@ -32,7 +32,8 @@ cert_manager_version = "v1.19.1"
 gateway_replicas = 2
 scrape_interval  = "60s"
 
-# Leave false until the LGTM stack exists in Cluster B. While false the gateway
-# prints arriving telemetry to its own logs, which is how the pipeline is
-# verified before Section 3 lands.
-lgtm_enabled = false
+# The LGTM backends are deployed by this same root module, so the gateway fans
+# out to them. Set false only to fall back to the debug sink, which is the
+# fastest way to prove telemetry is ARRIVING when the question is whether the
+# problem is the cross-cluster hop or a backend.
+lgtm_enabled = true
