@@ -238,6 +238,20 @@ variable "ecr_repositories" {
     "charts/alloy"                                 = { description = "Grafana Alloy OCI Helm chart" }
     "charts/aws-load-balancer-controller"          = { description = "AWS Load Balancer Controller OCI Helm chart" }
     "charts/cert-manager"                          = { description = "cert-manager OCI Helm chart" }
+
+    # LGTM backends, Grafana and metrics-server.
+    "mirror/grafana/mimir"                 = { description = "Grafana Mimir, the metrics backend" }
+    "mirror/grafana/loki"                  = { description = "Grafana Loki, the logs backend" }
+    "mirror/grafana/tempo"                 = { description = "Grafana Tempo, the traces backend" }
+    "mirror/grafana/grafana"               = { description = "Grafana, the single pane of glass" }
+    "mirror/grafana/rollout-operator"      = { description = "Rollout operator, required by mimir-distributed to roll StatefulSets" }
+    "mirror/nginxinc/nginx-unprivileged"   = { description = "nginx, the Mimir and Loki chart gateways" }
+    "mirror/metrics-server/metrics-server" = { description = "metrics-server, the resource metrics API every HPA reads" }
+    "charts/mimir-distributed"             = { description = "Mimir OCI Helm chart" }
+    "charts/loki"                          = { description = "Loki OCI Helm chart" }
+    "charts/tempo"                         = { description = "Tempo OCI Helm chart, single-binary" }
+    "charts/grafana"                       = { description = "Grafana OCI Helm chart" }
+    "charts/metrics-server"                = { description = "metrics-server OCI Helm chart" }
   }
 }
 

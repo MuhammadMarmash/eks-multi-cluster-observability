@@ -59,7 +59,7 @@ jobs:
       # after real resources exist, with errors naming a regex rather than the
       # offending character.
       - name: Check AWS string constraints
-        run: ./scripts/check-aws-string-constraints.sh
+        run: ./scripts/check-aws-string-constraints.sh && ./scripts/check-mirror-repos.sh
 
       - name: Run module tests
         # terraform test with mock_provider — no AWS account required.

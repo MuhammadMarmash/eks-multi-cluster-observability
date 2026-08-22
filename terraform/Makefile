@@ -20,6 +20,7 @@ validate: ## Validate every root module (no backend, no credentials needed)
 
 aws-strings: ## Check descriptions and tag values against AWS API character sets
 	@../scripts/check-aws-string-constraints.sh
+	@../scripts/check-mirror-repos.sh
 
 test: ## Run terraform test for every module that has a tests/ directory
 	@for m in modules/*/; do \
