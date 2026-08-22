@@ -118,9 +118,22 @@ variable "nginx_image_tag" {
 }
 
 variable "rollout_operator_image_tag" {
-  description = "grafana/rollout-operator tag. Mimir's chart requires it to manage StatefulSet rollouts."
+  description = <<-EOT
+    grafana/rollout-operator tag.
+
+    Must match the appVersion of the rollout-operator SUBCHART, not the parent
+    chart and not the latest release:
+
+      helm show chart grafana/mimir-distributed --version <v> # parent only
+      grep appVersion charts/rollout-operator/Chart.yaml      # this one
+
+    The chart passes flags that only exist in its own appVersion. An older tag
+    starts, rejects the flag, prints its help text and exits — and because the
+    operator serves a prepare-downscale admission webhook, every StatefulSet
+    patch in the namespace then fails with "no endpoints available".
+  EOT
   type        = string
-  default     = "v0.31.0"
+  default     = "v0.38.1"
 }
 
 # --- Sizing --------------------------------------------------------------------
