@@ -37,7 +37,7 @@ variable "cost_center" {
 variable "repository_url" {
   description = "Git repository that owns this infrastructure. Tagged onto every resource so an on-call engineer can find the source of any resource."
   type        = string
-  default     = "https://github.com/CHANGE-ME/devops-project3"
+  default     = "https://github.com/MuhammadMarmash/eks-multi-cluster-observability"
 }
 
 variable "az_count" {
