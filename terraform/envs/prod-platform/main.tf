@@ -9,6 +9,7 @@
 #   lgtm-backends       x1  -> Cluster B, Mimir + Loki + Tempo on S3
 #   grafana             x1  -> Cluster B, the single pane of glass
 #   metrics-server      x2  -> BOTH clusters, so an HPA can function at all
+#   storage-class       x2  -> BOTH clusters, a CSI-backed default for PVCs
 #
 # Modules never call each other. This file is the only place the two clusters
 # meet, and it is the only place that knows the gateway's name, CA and
@@ -216,8 +217,12 @@ module "lgtm_backends" {
   ingester_replicas  = var.lgtm_ingester_replicas
   enable_caches      = var.lgtm_enable_caches
 
-  # Every backend creates Services. See the note on cert_manager.
-  depends_on = [module.lb_controller]
+  # Services need the controller; the Mimir ingester's WAL volume needs a
+  # default StorageClass to bind against.
+  depends_on = [
+    module.lb_controller,
+    module.storage_class_observability,
+  ]
 }
 
 ###############################################################################
@@ -289,4 +294,29 @@ module "metrics_server_observability" {
   chart_version    = var.metrics_server_chart_version
   image_registry   = local.registry
   image_tag        = var.metrics_server_image_tag
+}
+
+###############################################################################
+# 8. DEFAULT STORAGE CLASS — both clusters
+#
+# The EBS CSI add-on installs the driver but creates no StorageClass, and the
+# gp2 class EKS ships is neither default nor CSI-backed. Without a default, any
+# PVC omitting storageClassName stays Pending forever — which is what stalled
+# the Mimir ingester's WAL volume and timed out its Helm release.
+###############################################################################
+
+module "storage_class_workload" {
+  source = "../../modules/storage-class"
+
+  providers = {
+    kubernetes = kubernetes.workload
+  }
+}
+
+module "storage_class_observability" {
+  source = "../../modules/storage-class"
+
+  providers = {
+    kubernetes = kubernetes.observability
+  }
 }
