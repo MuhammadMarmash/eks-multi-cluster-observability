@@ -62,6 +62,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
       - run: terraform -chdir=terraform fmt -check -recursive
       - run: cd terraform && make validate
+      - run: ./scripts/check-aws-string-constraints.sh
       - run: cd terraform && make test
       - run: ./charts/telemetry-certs/test.sh
       - run: ./scripts/validate-alloy-configs.sh

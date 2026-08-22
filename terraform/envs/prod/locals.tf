@@ -47,11 +47,17 @@ locals {
     env = {
       ENABLE_PREFIX_DELEGATION = "true"
       WARM_PREFIX_TARGET       = "1"
-
-      # Network policy support, so the LGTM namespaces can be locked down with
-      # NetworkPolicies rather than relying on security groups alone.
-      ENABLE_NETWORK_POLICY = "true"
     }
+
+    # Top level, and camelCase. It is NOT an entry under `env` — the add-on
+    # schema rejects unknown env keys outright, and the error names the JSON
+    # path rather than the setting, so it reads as a schema problem rather than
+    # a misplaced key. Confirmed against
+    #   aws eks describe-addon-configuration --addon-name vpc-cni
+    #
+    # Lets the LGTM namespaces be locked down with NetworkPolicies rather than
+    # relying on security groups alone.
+    enableNetworkPolicy = "true"
   }) : null
 
   # Cluster-admin access entries, applied identically to both clusters.

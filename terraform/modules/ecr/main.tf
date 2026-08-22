@@ -38,9 +38,14 @@ resource "aws_ecr_repository" "this" {
     kms_key         = var.encryption_type == "KMS" ? var.kms_key_arn : null
   }
 
+  # No Description tag. AWS tag VALUES accept only letters, numbers, spaces and
+  # `+ - = . _ : / @` — not parentheses, commas or em dashes, all of which
+  # appear naturally in prose. ECR rejects the whole CreateRepository call with
+  # "Tag parameters are invalid" and names no offending character. The
+  # descriptions stay in variables.tf, where they are documentation rather than
+  # metadata.
   tags = merge(local.tags, {
-    "Name"        = each.key
-    "Description" = each.value.description
+    "Name" = each.key
   })
 }
 

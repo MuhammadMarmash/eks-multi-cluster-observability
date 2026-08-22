@@ -3,7 +3,7 @@ ENV ?= prod
 DIR := envs/$(ENV)
 PLATFORM_DIR := envs/prod-platform
 
-.PHONY: help fmt validate test alloy-validate lgtm-validate mirror init plan apply destroy output verify clean bootstrap \
+.PHONY: help fmt validate aws-strings test alloy-validate lgtm-validate mirror init plan apply destroy output verify clean bootstrap \
         platform-init platform-plan platform-apply platform-destroy
 
 help: ## Show this help
@@ -16,6 +16,10 @@ validate: ## Validate every root module (no backend, no credentials needed)
 	cd $(DIR) && terraform init -backend=false -input=false >/dev/null && terraform validate
 	cd $(PLATFORM_DIR) && terraform init -backend=false -input=false >/dev/null && terraform validate
 	cd bootstrap && terraform init -backend=false -input=false >/dev/null && terraform validate
+	@$(MAKE) --no-print-directory aws-strings
+
+aws-strings: ## Check descriptions and tag values against AWS API character sets
+	@../scripts/check-aws-string-constraints.sh
 
 test: ## Run terraform test for every module that has a tests/ directory
 	@for m in modules/*/; do \

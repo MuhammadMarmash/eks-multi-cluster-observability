@@ -55,6 +55,12 @@ jobs:
       - name: Validate every root module
         run: cd terraform && make validate
 
+      # Terraform accepts these; the AWS API does not. They fail mid-apply,
+      # after real resources exist, with errors naming a regex rather than the
+      # offending character.
+      - name: Check AWS string constraints
+        run: ./scripts/check-aws-string-constraints.sh
+
       - name: Run module tests
         # terraform test with mock_provider — no AWS account required.
         run: cd terraform && make test

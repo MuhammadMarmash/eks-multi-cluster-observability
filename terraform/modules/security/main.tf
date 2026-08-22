@@ -32,9 +32,12 @@ locals {
 ###############################################################################
 
 resource "aws_vpc_peering_connection" "this" {
-  vpc_id      = var.workload_vpc_id      # requester  — Cluster A
-  peer_vpc_id = var.observability_vpc_id # accepter   — Cluster B
-  peer_region = data.aws_region.current.region
+  vpc_id      = var.workload_vpc_id      # requester, Cluster A
+  peer_vpc_id = var.observability_vpc_id # accepter,  Cluster B
+
+  # peer_region is deliberately unset. AWS refuses `peer_region` together with
+  # `auto_accept = true`, and both VPCs are in the same Region anyway, so the
+  # peer Region is implied. Setting it would force manual acceptance.
   auto_accept = var.auto_accept_peering
 
   tags = merge(local.tags, {
@@ -162,8 +165,10 @@ resource "aws_vpc_security_group_egress_rule" "otlp_ingress_return" {
 ###############################################################################
 
 resource "aws_security_group" "otlp_egress" {
-  name        = "${var.name_prefix}-otlp-egress-sg"
-  description = "Allow the workload cluster's telemetry agents to reach the observability VPC on OTLP ports"
+  name = "${var.name_prefix}-otlp-egress-sg"
+  # No apostrophe. EC2 restricts security group descriptions to
+  # `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*`, which does not include `'`.
+  description = "Telemetry agents on the workload cluster may reach the observability VPC on OTLP ports"
   vpc_id      = var.workload_vpc_id
 
   tags = merge(local.tags, {

@@ -238,7 +238,10 @@ module "irsa" {
   oidc_provider_host = var.oidc_provider_host
   namespace          = var.namespace
   service_account    = each.value.service_account
-  description        = "${title(each.key)} ${each.value.signal} storage — ${local.bucket_names[each.key]}"
+  # Plain ASCII only: IAM validates descriptions against
+  # [\u0009\u000A\u000D\u0020-\u007E\u00A1-\u00FF], which excludes the em
+  # dash (U+2014) that reads naturally in prose elsewhere in this repository.
+  description = "${title(each.key)} ${each.value.signal} storage for ${local.bucket_names[each.key]}"
 
   inline_policy_json = local.policy_documents[each.key]
 
