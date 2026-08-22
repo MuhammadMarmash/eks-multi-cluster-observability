@@ -56,6 +56,24 @@ output "lgtm_query_endpoints" {
   value       = module.lgtm_backends.query_endpoints
 }
 
+# --- Grafana --------------------------------------------------------------------
+
+output "grafana_url" {
+  description = "How to reach the console. ClusterIP on purpose — a second load balancer for a demo would double this layer's hourly cost."
+  value       = module.grafana.port_forward_command
+}
+
+output "grafana_admin_user" {
+  description = "Grafana admin username."
+  value       = module.grafana.admin_user
+}
+
+output "grafana_admin_password" {
+  description = "Grafana admin password. Generated, never committed. Retrieve with `terraform output -raw grafana_admin_password`."
+  value       = module.grafana.admin_password
+  sensitive   = true
+}
+
 # The runbook's checks, rendered with this deployment's actual names so they
 # can be copied and run without editing.
 output "verification" {
@@ -65,6 +83,7 @@ output "verification" {
     "2_agent_logs"       = "kubectl --context ${local.workload_cluster_name} -n ${var.telemetry_namespace} logs -l app.kubernetes.io/name=alloy --tail=50"
     "3_agent_sent"       = "kubectl --context ${local.workload_cluster_name} -n ${var.telemetry_namespace} exec ds/alloy-agent -- wget -qO- localhost:12345/metrics | grep otelcol_exporter_send"
     "4_gateway_received" = "kubectl --context ${local.observability_cluster_name} -n ${var.telemetry_namespace} logs -l app.kubernetes.io/name=alloy --tail=50"
+    "6_grafana"          = "${module.grafana.port_forward_command}  # then open http://localhost:3000"
     "5_reject_anonymous" = "kubectl --context ${local.workload_cluster_name} -n ${var.telemetry_namespace} exec ds/alloy-agent -- wget -qO- --post-data='{}' --header='Content-Type: application/json' https://${module.gateway.gateway_dns_name}:4318/v1/traces"
   }
 }

@@ -93,35 +93,35 @@ variable "gateway_replicas" {
 variable "lgtm_enabled" {
   description = <<-EOT
     Route gateway output to Mimir, Loki and Tempo instead of the debug sink.
-    Leave false until the LGTM stack exists in Cluster B; until then the debug
-    sink in the gateway's pod logs is how arrival is confirmed.
+
+    True now that the backends are deployed in the same root module. Setting it
+    false falls back to the debug sink, which is still the fastest way to prove
+    telemetry is ARRIVING when the question is whether the problem is the
+    cross-cluster hop or a backend.
   EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
-variable "mimir_endpoint" {
-  description = "Mimir OTLP endpoint inside Cluster B. Only used when lgtm_enabled is true."
-  type        = string
-  default     = "http://mimir-nginx.lgtm.svc.cluster.local/otlp"
-}
 
-variable "loki_endpoint" {
-  description = "Loki OTLP endpoint inside Cluster B. Only used when lgtm_enabled is true."
-  type        = string
-  default     = "http://loki-gateway.lgtm.svc.cluster.local/otlp"
-}
 
-variable "tempo_endpoint" {
-  description = "Tempo OTLP/gRPC endpoint inside Cluster B. Only used when lgtm_enabled is true."
-  type        = string
-  default     = "tempo-distributor.lgtm.svc.cluster.local:4317"
-}
 
 variable "scrape_interval" {
   description = "kubelet and cAdvisor scrape interval on Cluster A."
   type        = string
   default     = "60s"
+}
+
+variable "grafana_chart_version" {
+  description = "Grafana chart version. Matches scripts/mirror-images.sh."
+  type        = string
+  default     = "10.5.15"
+}
+
+variable "grafana_image_tag" {
+  description = "Grafana image tag (chart 10.5.15 appVersion)."
+  type        = string
+  default     = "12.3.1"
 }
 
 # --- LGTM backends -------------------------------------------------------------

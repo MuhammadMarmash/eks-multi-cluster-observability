@@ -33,7 +33,7 @@ output "query_endpoints" {
   value = {
     mimir = "http://mimir-query-frontend.${var.namespace}.svc.cluster.local:8080/prometheus"
     loki  = "http://loki-gateway.${var.namespace}.svc.cluster.local"
-    tempo = "http://tempo.${var.namespace}.svc.cluster.local:3100"
+    tempo = "http://tempo.${var.namespace}.svc.cluster.local:3200"
   }
 }
 

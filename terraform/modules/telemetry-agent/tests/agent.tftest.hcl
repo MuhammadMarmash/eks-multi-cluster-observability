@@ -10,7 +10,8 @@ variables {
   ingest_password  = "not-a-real-password"
   chart_repository = "oci://123456789012.dkr.ecr.eu-west-1.amazonaws.com/charts"
   chart_version    = "1.4.0"
-  image_repository = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/mirror/grafana/alloy"
+  image_registry   = "123456789012.dkr.ecr.eu-west-1.amazonaws.com"
+  image_repository = "mirror/grafana/alloy"
   image_tag        = "v1.12.0"
 }
 
@@ -141,5 +142,33 @@ run "runs_as_a_daemonset_with_host_logs_mounted" {
   assert {
     condition     = output.values.rbac.create == true
     error_message = "The agent needs read-only discovery of pods and nodes; without RBAC nothing is discovered at all."
+  }
+}
+
+# An empty `registry` makes the chart emit "<empty>/<repository>" — a LEADING
+# SLASH and an image reference Kubernetes cannot pull. It renders fine, passes
+# every values assertion, and fails as ImagePullBackOff on a live cluster.
+run "image_reference_has_no_leading_slash" {
+  command = plan
+
+  assert {
+    condition     = output.values.image.registry != ""
+    error_message = "registry must be the ECR hostname, not empty; the chart concatenates registry and repository."
+  }
+
+  assert {
+    condition     = !startswith(output.values.image.repository, "/")
+    error_message = "repository must be a path within the registry, with no leading slash."
+  }
+}
+
+# The chart's config-reloader sidecar pulls from quay.io, which ADR 0005 forbids
+# at deploy time.
+run "no_unmirrored_sidecar" {
+  command = plan
+
+  assert {
+    condition     = output.values.configReloader.enabled == false
+    error_message = "The config-reloader sidecar pulls an unmirrored quay.io image and reloads a config that only ever changes via a Helm release."
   }
 }

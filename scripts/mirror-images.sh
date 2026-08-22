@@ -35,6 +35,8 @@ LOKI_IMAGE_TAG="3.6.12"
 TEMPO_CHART_VERSION="1.24.4"
 TEMPO_IMAGE_TAG="2.9.0"
 ROLLOUT_OPERATOR_IMAGE_TAG="v0.31.0"
+GRAFANA_CHART_VERSION="10.5.15"
+GRAFANA_IMAGE_TAG="12.3.1"
 NGINX_IMAGE_TAG="1.29-alpine"
 
 log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
@@ -113,6 +115,8 @@ mirror_image "docker.io/grafana/tempo:${TEMPO_IMAGE_TAG}" \
              "mirror/grafana/tempo" "${TEMPO_IMAGE_TAG}"
 mirror_image "docker.io/grafana/rollout-operator:${ROLLOUT_OPERATOR_IMAGE_TAG}" \
              "mirror/grafana/rollout-operator" "${ROLLOUT_OPERATOR_IMAGE_TAG}"
+mirror_image "docker.io/grafana/grafana:${GRAFANA_IMAGE_TAG}" \
+             "mirror/grafana/grafana" "${GRAFANA_IMAGE_TAG}"
 mirror_image "docker.io/nginxinc/nginx-unprivileged:${NGINX_IMAGE_TAG}" \
              "mirror/nginxinc/nginx-unprivileged" "${NGINX_IMAGE_TAG}"
 
@@ -122,5 +126,6 @@ mirror_chart "jetstack/cert-manager"            "${CERT_MANAGER_VERSION}" "chart
 mirror_chart "grafana/mimir-distributed"        "${MIMIR_CHART_VERSION}"  "charts/mimir-distributed"
 mirror_chart "grafana/loki"                     "${LOKI_CHART_VERSION}"   "charts/loki"
 mirror_chart "grafana/tempo"                    "${TEMPO_CHART_VERSION}"  "charts/tempo"
+mirror_chart "grafana/grafana"                  "${GRAFANA_CHART_VERSION}" "charts/grafana"
 
 log "done. registry: ${REGISTRY}"

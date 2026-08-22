@@ -100,11 +100,21 @@ locals {
       create = true
     }
 
+    # registry and repository are concatenated by the chart as
+    # "<registry>/<repository>". An empty registry yields a LEADING SLASH and an
+    # invalid image reference, so the two halves are passed separately.
     image = {
-      registry   = ""
+      registry   = var.image_registry
       repository = var.image_repository
       tag        = var.image_tag
     }
+
+    # The chart's config-reloader sidecar pulls from quay.io, which ADR 0005
+    # forbids at deploy time. It exists to signal a reload when the ConfigMap
+    # changes; here the config only ever changes through a Helm release, which
+    # rolls the pods anyway, so the sidecar buys nothing and costs an
+    # unmirrored image plus 50Mi per pod.
+    configReloader = { enabled = false }
   }
 }
 
