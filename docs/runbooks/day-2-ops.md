@@ -219,6 +219,48 @@ count_over_time(up[1h])
 
 against the upgrade window. A dip is a gap; a flat line is not.
 
+## When an admission webhook deadlocks its own repair
+
+Twice during the first deployment, an unavailable webhook blocked work that had
+nothing to do with it. The pattern is worth recognising because the error names the
+victim, never the cause.
+
+**The AWS Load Balancer Controller** registers a Service mutator webhook with
+`failurePolicy: Fail` that intercepts every Service CREATE in the cluster. While the
+controller has no ready endpoints, nothing anywhere can create a Service. That one is
+now disabled in `modules/aws-lb-controller`, because the single LoadBalancer Service
+here sets its type annotation explicitly and never needed it.
+
+**Mimir's rollout-operator** serves a `prepare-downscale` webhook that gates every
+StatefulSet patch in its namespace. This one deadlocks: if the operator itself is
+broken — a bad image tag, say — the Helm upgrade that would fix it cannot patch any
+StatefulSet, because the broken operator is the thing refusing the patch.
+
+Breaking the deadlock means bypassing Helm exactly once:
+
+```bash
+# Fix the operator directly, then let Terraform reconcile.
+kubectl -n lgtm set image deployment/mimir-rollout-operator \
+  rollout-operator=<registry>/mirror/grafana/rollout-operator:<correct-tag>
+
+kubectl -n lgtm rollout status deployment/mimir-rollout-operator
+```
+
+The correct tag is the **subchart's** appVersion, not the parent chart's and not the
+latest release:
+
+```bash
+helm pull grafana/mimir-distributed --version 6.2.0 --untar
+grep appVersion mimir-distributed/charts/rollout-operator/Chart.yaml
+```
+
+The chart passes flags that exist only in its own appVersion. An older image starts,
+rejects the flag, prints its help text and exits — which looks like a crash loop rather
+than a version mismatch until you read the logs closely.
+
+Deleting the `ValidatingWebhookConfiguration` also works and is more drastic; prefer
+patching the image, which leaves the admission chain intact.
+
 ## Rollback
 
 **An EKS control plane cannot be downgraded.** There is no rollback step, and any runbook
