@@ -77,6 +77,11 @@ module "cert_manager" {
   chart_repository = local.chart_registry
   chart_version    = var.cert_manager_version
   image_registry   = local.registry
+
+  # Belt and braces alongside disabling the Service mutator webhook. If that
+  # webhook is ever re-enabled, anything creating a Service must not race the
+  # controller becoming ready.
+  depends_on = [module.lb_controller]
 }
 
 ###############################################################################
@@ -210,6 +215,9 @@ module "lgtm_backends" {
   replication_factor = var.lgtm_replication_factor
   ingester_replicas  = var.lgtm_ingester_replicas
   enable_caches      = var.lgtm_enable_caches
+
+  # Every backend creates Services. See the note on cert_manager.
+  depends_on = [module.lb_controller]
 }
 
 ###############################################################################

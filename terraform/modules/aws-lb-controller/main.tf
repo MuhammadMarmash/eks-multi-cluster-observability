@@ -45,6 +45,22 @@ locals {
 
     enableCertManager = false
 
+    # OFF, and this is a correctness fix rather than a preference.
+    #
+    # The Service mutator webhook intercepts every Service CREATE in the WHOLE
+    # cluster, with failurePolicy: Fail. While the controller has no ready
+    # endpoints, nothing anywhere can create a Service — cert-manager, Mimir,
+    # Loki and Grafana all fail with "no endpoints available for service
+    # aws-load-balancer-webhook-service", which names the victim rather than
+    # the cause.
+    #
+    # Its only job is to stamp loadBalancerClass onto Services of type
+    # LoadBalancer that do NOT carry the aws-load-balancer-type annotation. The
+    # one such Service in this platform, the telemetry gateway's NLB, sets that
+    # annotation explicitly, so the webhook has nothing to do here and exists
+    # purely as a cluster-wide single point of failure.
+    enableServiceMutatorWebhook = false
+
     # The controller is cluster infrastructure: it must keep running while the
     # nodes it manages are under pressure.
     resources = {

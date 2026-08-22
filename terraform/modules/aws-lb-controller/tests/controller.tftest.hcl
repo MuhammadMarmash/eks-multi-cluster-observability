@@ -107,3 +107,17 @@ run "release_is_pinned_and_does_not_create_its_namespace" {
     error_message = "Terraform owns namespaces; charts never create them."
   }
 }
+
+# The Service mutator webhook intercepts every Service CREATE in the cluster
+# with failurePolicy: Fail, so while the controller has no ready endpoints,
+# nothing anywhere can create a Service. It only stamps loadBalancerClass onto
+# Services that omit the aws-load-balancer-type annotation, and the one
+# LoadBalancer Service here sets that annotation explicitly.
+run "no_cluster_wide_service_admission_chokepoint" {
+  command = plan
+
+  assert {
+    condition     = output.values.enableServiceMutatorWebhook == false
+    error_message = "The Service mutator webhook blocks all Service creation cluster-wide whenever the controller is unavailable, and this platform does not need it."
+  }
+}
