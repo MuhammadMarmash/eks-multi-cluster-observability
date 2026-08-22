@@ -122,6 +122,7 @@ authenticated, and arrived identifiable.
 | `401` on every batch | credential drift between the two Secrets | re-apply `prod-platform`; both Secrets come from one `random_password` |
 | agent `CrashLoopBackOff` at startup | Alloy config error, or a component below the stability level | `kubectl logs` names the line and column. Run `make alloy-validate` |
 | gateway pods `Pending` | the TLS Secret does not exist yet | cert-manager has not issued: `kubectl get certificate -A` |
+| node group stuck `CREATING`, no `health.issues`, no ASG | account restricted to free-tier instance types | CloudTrail shows `RunInstances / InvalidParameterCombination`. Set `node_instance_types` to a free-tier-eligible type |
 | `ImagePullBackOff` | the tag was never mirrored | `make mirror`, then check the version pins match |
 | gateway `CrashLoopBackOff` mentioning "stability level" | an experimental component with the gate down | see [ADR 0006](adr/0006-telemetry-agent-selection.md); `alloy.stabilityLevel` |
 

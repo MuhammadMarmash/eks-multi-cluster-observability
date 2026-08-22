@@ -149,6 +149,14 @@ docs/runbooks/          Day-2 operations
 **Prerequisites** — Terraform ≥ 1.11 · AWS CLI v2 · Helm 3 · Docker · `kubectl` · `jq` ·
 an AWS account you are willing to spend roughly $8–10/day in.
 
+> **If your AWS account is on the Free Plan**, `RunInstances` rejects any instance type that
+> is not free-tier-eligible, and `t3.medium` is not. The symptom is unhelpful: the node group
+> sits in `CREATING` for the full 30-minute timeout, `health.issues` stays empty, and no Auto
+> Scaling group is ever created. The reason only appears in CloudTrail. Check with
+> `aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true` and set
+> `node_instance_types` accordingly — `m7i-flex.large` is eligible and gives 2 vCPU / 8 GiB,
+> more than the default.
+
 ### 1. Bootstrap (once per account)
 
 Creates the state bucket, the GitHub OIDC provider and the three CI roles.
