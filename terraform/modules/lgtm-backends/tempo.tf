@@ -18,7 +18,11 @@ locals {
     replicas = 1
 
     tempo = {
-      repository = "${var.image_registry}/mirror/grafana/tempo"
+      # The chart renders `{{ .Values.tempo.registry }}/{{ .Values.tempo.repository }}`.
+      # Putting the full path in repository leaves registry at docker.io and
+      # produces docker.io/<account>.dkr.ecr.../tempo.
+      registry   = var.image_registry
+      repository = "mirror/grafana/tempo"
       tag        = var.tempo_image_tag
 
       storage = {

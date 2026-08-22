@@ -51,10 +51,28 @@ locals {
         # write is refused.
         ingester = {
           ring = { replication_factor = var.replication_factor }
+
+          # The chart disables this when ingest_storage is on. With the classic
+          # path restored, the distributor has no other way to reach ingesters.
+          push_grpc_method_enabled = true
         }
 
         store_gateway = {
           sharding_ring = { replication_factor = var.replication_factor }
+        }
+
+        # mimir-distributed 6.2.0 templates `ingest_storage.enabled: true` — the
+        # Kafka-backed write path that Mimir 3.x made the default — and only
+        # fills in the Kafka address when the chart's bundled Kafka is enabled.
+        # Turning that StatefulSet off therefore leaves Mimir configured for an
+        # ingest path with no broker, and every component dies at config
+        # validation with "the Kafka address has not been configured".
+        #
+        # The classic path is distributor -> ingester over gRPC. It needs no
+        # broker, which is the right trade here: Kafka would add a StatefulSet,
+        # a PVC and a durability story this platform already gets from S3.
+        ingest_storage = {
+          enabled = false
         }
 
         server = { log_level = var.log_level }
@@ -141,8 +159,12 @@ locals {
     # Required by the chart to roll StatefulSets safely; it is not optional.
     rollout_operator = {
       enabled = true
+      # The subchart joins registry and repository. Leaving registry at its
+      # docker.io default yields docker.io/<account>.dkr.ecr.../rollout-operator,
+      # which fails as ErrImagePull.
       image = {
-        repository = "${var.image_registry}/mirror/grafana/rollout-operator"
+        registry   = var.image_registry
+        repository = "mirror/grafana/rollout-operator"
         tag        = var.rollout_operator_image_tag
       }
       resources = { requests = { cpu = "50m", memory = "64Mi" }, limits = { memory = "128Mi" } }

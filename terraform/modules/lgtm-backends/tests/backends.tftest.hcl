@@ -288,3 +288,15 @@ run "loki_schema_is_supplied" {
     error_message = "Loki schema object_store must be s3."
   }
 }
+
+# The ruler sidecar pulls kiwigrid/k8s-sidecar from Docker Hub. Nothing in our
+# values names that image — it comes from the chart's own defaults — so only a
+# rendered-manifest check catches it. See scripts/validate-lgtm-values.sh.
+run "no_unmirrored_sidecar_containers" {
+  command = plan
+
+  assert {
+    condition     = output.loki_values.sidecar.rules.enabled == false
+    error_message = "The Loki ruler sidecar pulls from Docker Hub and watches rules this platform does not define."
+  }
+}

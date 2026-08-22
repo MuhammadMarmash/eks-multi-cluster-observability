@@ -89,6 +89,9 @@ import sys, yaml, re
 wd = sys.argv[1]
 expect_sa = {"mimir": "mimir-sa", "loki": "loki-sa", "tempo": "tempo-sa"}
 
+# Matches the placeholder registry in the tfvars written below.
+REGISTRY = "000000000000.dkr.ecr.eu-west-1.amazonaws.com"
+
 # Exactly one volumeClaimTemplate is intended: the Mimir ingester's write-ahead
 # log. It is not durable storage — blocks go to S3 — but without it a restarting
 # ingester loses every sample since its last block flush. Anything else with a
@@ -123,8 +126,19 @@ for c, want_sa in expect_sa.items():
             problems.append(f"{c}: bundled MinIO object rendered ({name})")
         if d["kind"] == "PersistentVolumeClaim":
             problems.append(f"{c}: standalone PVC rendered ({name})")
-        if d["kind"] not in ("Deployment", "StatefulSet"):
+        if d["kind"] not in ("Deployment", "StatefulSet", "DaemonSet", "Job"):
             continue
+
+        # Assert on the RENDERED image, not on our values. The registry a chart
+        # prepends lives in ITS defaults, so a values assertion cannot see it:
+        # setting a full ECR path in `repository` while `registry` stays
+        # docker.io yields docker.io/<account>.dkr.ecr.../image, which is
+        # syntactically valid and fails only as ErrImagePull on a live cluster.
+        pod = d["spec"]["template"]["spec"]
+        for ct in pod.get("containers", []) + pod.get("initContainers", []):
+            img = ct.get("image", "")
+            if not img.startswith(REGISTRY + "/"):
+                problems.append(f"{c}: {name} container {ct.get('name')} pulls {img}, not from ECR")
         if d["spec"].get("volumeClaimTemplates") and name not in ALLOWED_PVC:
             problems.append(f"{c}: {name} has an unexpected volumeClaimTemplate")
         reps = d["spec"].get("replicas", 1) or 1

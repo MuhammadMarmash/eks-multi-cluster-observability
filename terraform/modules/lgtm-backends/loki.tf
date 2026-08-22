@@ -105,6 +105,14 @@ locals {
       resources = { requests = { cpu = "50m", memory = "64Mi" }, limits = { memory = "128Mi" } }
     }
 
+    # The ruler sidecar watches ConfigMaps for Loki alerting rules and pulls
+    # kiwigrid/k8s-sidecar straight from Docker Hub, which ADR 0005 forbids at
+    # deploy time. There are no Loki rules here, so it is a second container per
+    # backend pod doing nothing — disabled rather than mirrored.
+    sidecar = {
+      rules = { enabled = false }
+    }
+
     # chunksCache requests 8192Mi by default — an entire t3.large node for a
     # cache, before Loki itself has started.
     chunksCache  = { enabled = var.enable_caches }
