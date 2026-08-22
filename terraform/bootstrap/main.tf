@@ -158,7 +158,7 @@ data "aws_iam_policy_document" "state" {
   }
 
   statement {
-    sid    = "DenyUnEncryptedObjectUploads"
+    sid    = "DenyWrongEncryptionOnUpload"
     effect = "Deny"
 
     principals {
@@ -173,6 +173,25 @@ data "aws_iam_policy_document" "state" {
       test     = "StringNotEquals"
       variable = "s3:x-amz-server-side-encryption"
       values   = var.use_customer_managed_key ? ["aws:kms"] : ["AES256", "aws:kms"]
+    }
+
+    # WITHOUT THIS, THE BUCKET REJECTS TERRAFORM'S OWN STATE WRITES.
+    #
+    # `s3:x-amz-server-side-encryption` only exists as a condition key when the
+    # client explicitly sends the header. Terraform's S3 backend does not — it
+    # relies on the bucket's default encryption, which is configured above and
+    # cannot be bypassed. With the key absent, StringNotEquals evaluates TRUE
+    # and the Deny fires on a request that would have been encrypted correctly
+    # anyway. The lock object is the first casualty, so the failure looks like
+    # "cannot acquire state lock" rather than an encryption problem.
+    #
+    # This narrows the rule to what was actually intended: reject an upload
+    # that names the WRONG algorithm, and leave one that names none to the
+    # bucket default.
+    condition {
+      test     = "Null"
+      variable = "s3:x-amz-server-side-encryption"
+      values   = ["false"]
     }
   }
 }
