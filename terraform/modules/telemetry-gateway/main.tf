@@ -92,6 +92,37 @@ locals {
       type     = "deployment"
       replicas = var.replicas
 
+      # Without this, a node drain can evict BOTH replicas at once and ingest
+      # goes to zero. The agent on Cluster A retries for five minutes and then
+      # drops telemetry on the floor, so an unprotected gateway is the one thing
+      # that turns a routine node roll into data loss.
+      #   docs/runbooks/day-2-ops.md
+      podDisruptionBudget = {
+        enabled        = var.replicas > 1
+        maxUnavailable = 1
+      }
+
+      # Required, not preferred. `preferred` would let the scheduler co-locate
+      # both replicas under pressure, which is precisely the state a node roll
+      # creates — so the soft version fails exactly when it is needed.
+      #
+      # Safe at these numbers: two replicas across three nodes still schedule
+      # when one node is draining. Raising `replicas` above the node count would
+      # leave the surplus Pending, which is why the PDB is gated on replicas > 1
+      # rather than assumed.
+      affinity = {
+        podAntiAffinity = {
+          requiredDuringSchedulingIgnoredDuringExecution = [
+            {
+              topologyKey = "kubernetes.io/hostname"
+              labelSelector = {
+                matchLabels = local.pod_selector
+              }
+            },
+          ]
+        }
+      }
+
       volumes = {
         extra = [
           { name = "tls", secret = { secretName = local.tls_secret } },

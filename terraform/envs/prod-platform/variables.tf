@@ -124,6 +124,18 @@ variable "grafana_image_tag" {
   default     = "12.3.1"
 }
 
+variable "metrics_server_chart_version" {
+  description = "metrics-server chart version. Matches scripts/mirror-images.sh."
+  type        = string
+  default     = "3.14.0"
+}
+
+variable "metrics_server_image_tag" {
+  description = "metrics-server image tag (chart 3.14.0 appVersion)."
+  type        = string
+  default     = "v0.9.0"
+}
+
 # --- LGTM backends -------------------------------------------------------------
 
 variable "mimir_chart_version" {

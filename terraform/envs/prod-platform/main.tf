@@ -8,6 +8,7 @@
 #   telemetry-agent     x1  -> Cluster A, collects and ships
 #   lgtm-backends       x1  -> Cluster B, Mimir + Loki + Tempo on S3
 #   grafana             x1  -> Cluster B, the single pane of glass
+#   metrics-server      x2  -> BOTH clusters, so an HPA can function at all
 #
 # Modules never call each other. This file is the only place the two clusters
 # meet, and it is the only place that knows the gateway's name, CA and
@@ -242,4 +243,42 @@ module "grafana" {
   image_tag        = var.grafana_image_tag
 
   depends_on = [module.lgtm_backends]
+}
+
+###############################################################################
+# 7. METRICS SERVER — both clusters
+#
+# The resource metrics API. An HPA without it does not degrade, it never
+# functions: it reports `<unknown>` for its target forever.
+#
+# On both clusters because both need it — Cluster A for the Boutique, Cluster B
+# for the Mimir ingester autoscaling in docs/runbooks/day-2-ops.md.
+###############################################################################
+
+module "metrics_server_workload" {
+  source = "../../modules/metrics-server"
+
+  providers = {
+    helm = helm.workload
+  }
+
+  cluster_name     = local.workload_cluster_name
+  chart_repository = local.chart_registry
+  chart_version    = var.metrics_server_chart_version
+  image_registry   = local.registry
+  image_tag        = var.metrics_server_image_tag
+}
+
+module "metrics_server_observability" {
+  source = "../../modules/metrics-server"
+
+  providers = {
+    helm = helm.observability
+  }
+
+  cluster_name     = local.observability_cluster_name
+  chart_repository = local.chart_registry
+  chart_version    = var.metrics_server_chart_version
+  image_registry   = local.registry
+  image_tag        = var.metrics_server_image_tag
 }
