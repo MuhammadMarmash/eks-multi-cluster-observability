@@ -131,6 +131,45 @@ resource "aws_vpc_security_group_ingress_rule" "otlp" {
   tags = merge(local.tags, { "Name" = "otlp-${each.key}-from-workload" })
 }
 
+# The load balancer and the pods behind it BOTH carry this group: the root
+# module attaches it to the Cluster B nodes, and the gateway Service names it in
+# `aws-load-balancer-security-groups`. The rules above admit the workload VPC to
+# the load balancer, but nothing admits the LOAD BALANCER to the targets — so
+# even the TCP health check is dropped, every target reports
+# Target.FailedHealthChecks, and the NLB refuses to route. From the client the
+# symptom is an i/o timeout, which looks like a routing or peering fault.
+#
+# A self-referencing rule is exactly right here rather than a CIDR: it grants
+# only what already carries this group, and it stays correct if the load
+# balancer's addresses change.
+resource "aws_vpc_security_group_ingress_rule" "otlp_from_load_balancer" {
+  for_each = local.otlp_rules
+
+  security_group_id            = aws_security_group.otlp_ingress.id
+  description                  = "${each.value.description} via the internal load balancer"
+  referenced_security_group_id = aws_security_group.otlp_ingress.id
+  from_port                    = each.value.port
+  to_port                      = each.value.port
+  ip_protocol                  = "tcp"
+
+  tags = merge(local.tags, { "Name" = "otlp-${each.key}-from-nlb" })
+}
+
+# The other half. The load balancer carries this group too, so it needs egress
+# to the targets; without it the health check never leaves the load balancer.
+resource "aws_vpc_security_group_egress_rule" "otlp_to_targets" {
+  for_each = local.otlp_rules
+
+  security_group_id            = aws_security_group.otlp_ingress.id
+  description                  = "Load balancer to gateway targets on ${each.key}"
+  referenced_security_group_id = aws_security_group.otlp_ingress.id
+  from_port                    = each.value.port
+  to_port                      = each.value.port
+  ip_protocol                  = "tcp"
+
+  tags = merge(local.tags, { "Name" = "otlp-${each.key}-to-targets" })
+}
+
 resource "aws_vpc_security_group_ingress_rule" "extra" {
   for_each = var.extra_observability_ingress
 

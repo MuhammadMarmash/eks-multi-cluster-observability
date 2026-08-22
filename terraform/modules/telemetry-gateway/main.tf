@@ -290,6 +290,22 @@ resource "kubernetes_service_v1" "gateway" {
 
       # TCP, not TLS: termination belongs at the pod, per ADR 0002.
       "service.beta.kubernetes.io/aws-load-balancer-backend-protocol" = "tcp"
+
+      # REQUIRED whenever replicas are fewer than subnets, which is the normal
+      # case here: two gateway pods across three Availability Zones.
+      #
+      # An NLB places a node in EVERY subnet it is given, and with cross-zone
+      # OFF — the AWS default — each node forwards only to targets in its OWN
+      # zone. The node in the zone with no pod accepts the connection and
+      # black-holes it. Since the name resolves round-robin across all three
+      # node addresses, roughly a third of connections time out and the rest
+      # succeed, which reads as an intermittent network fault rather than a
+      # configuration choice.
+      #
+      # Anti-affinity spreads the replicas across NODES, which is what protects
+      # them from a single drain, but it does not guarantee they cover every
+      # zone. Cross-zone is what closes the gap.
+      "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
     }
   }
 

@@ -233,3 +233,16 @@ run "single_replica_gets_no_pdb" {
     error_message = "A PDB with maxUnavailable 1 on a single replica makes the node undrainable."
   }
 }
+
+# An NLB puts a node in every subnet it is given and, with cross-zone off,
+# each node serves only its own zone. Two replicas across three subnets
+# therefore leaves one zone with no target, black-holing about a third of
+# connections — an intermittent-looking fault with a configuration cause.
+run "no_zone_can_black_hole_traffic" {
+  command = plan
+
+  assert {
+    condition     = kubernetes_service_v1.gateway.metadata[0].annotations["service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled"] == "true"
+    error_message = "With fewer replicas than subnets, cross-zone load balancing is what stops a zone without a target from black-holing connections."
+  }
+}
