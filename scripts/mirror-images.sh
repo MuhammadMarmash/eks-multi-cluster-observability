@@ -50,6 +50,10 @@ require() {
 require aws
 require docker
 require helm
+docker buildx version >/dev/null 2>&1 || {
+  echo "docker buildx is required (it copies multi-arch images registry-to-registry)" >&2
+  exit 1
+}
 
 # Returns 0 when the tag already exists in ECR.
 tag_exists() {
@@ -61,6 +65,17 @@ tag_exists() {
     >/dev/null 2>&1
 }
 
+# Copies registry-to-registry with `docker buildx imagetools create` rather than
+# pull/tag/push.
+#
+# pull/tag/push breaks on multi-architecture images. Docker's containerd image
+# store keeps the source manifest INDEX but only the layers for the platform it
+# pulled, so the push either warns that it silently dropped the other platforms
+# or fails outright with "was found but does not provide any platform" — which
+# names neither the cause nor the image that caused it.
+#
+# imagetools copies the whole index without ever materialising it locally: it is
+# faster, uses no local disk, and reproduces upstream exactly.
 mirror_image() {
   local src="$1" repo="$2" tag="$3"
   if tag_exists "$repo" "$tag"; then
@@ -68,9 +83,7 @@ mirror_image() {
     return 0
   fi
   log "image ${src} -> ${REGISTRY}/${repo}:${tag}"
-  docker pull --platform linux/amd64 "$src"
-  docker tag "$src" "${REGISTRY}/${repo}:${tag}"
-  docker push "${REGISTRY}/${repo}:${tag}"
+  docker buildx imagetools create --tag "${REGISTRY}/${repo}:${tag}" "$src"
 }
 
 mirror_chart() {
