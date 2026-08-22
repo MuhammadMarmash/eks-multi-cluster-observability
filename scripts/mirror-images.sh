@@ -37,6 +37,8 @@ TEMPO_IMAGE_TAG="2.9.0"
 ROLLOUT_OPERATOR_IMAGE_TAG="v0.31.0"
 GRAFANA_CHART_VERSION="10.5.15"
 GRAFANA_IMAGE_TAG="12.3.1"
+METRICS_SERVER_CHART_VERSION="3.14.0"
+METRICS_SERVER_IMAGE_TAG="v0.9.0"
 NGINX_IMAGE_TAG="1.29-alpine"
 
 log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
@@ -95,6 +97,7 @@ log "adding upstream chart repositories"
 helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
 helm repo add eks https://aws.github.io/eks-charts >/dev/null
 helm repo add jetstack https://charts.jetstack.io >/dev/null
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null
 helm repo update >/dev/null
 
 mirror_image "docker.io/grafana/alloy:${ALLOY_IMAGE_TAG}" \
@@ -115,6 +118,9 @@ mirror_image "docker.io/grafana/tempo:${TEMPO_IMAGE_TAG}" \
              "mirror/grafana/tempo" "${TEMPO_IMAGE_TAG}"
 mirror_image "docker.io/grafana/rollout-operator:${ROLLOUT_OPERATOR_IMAGE_TAG}" \
              "mirror/grafana/rollout-operator" "${ROLLOUT_OPERATOR_IMAGE_TAG}"
+# Note the registry: metrics-server publishes to registry.k8s.io, not Docker Hub.
+mirror_image "registry.k8s.io/metrics-server/metrics-server:${METRICS_SERVER_IMAGE_TAG}" \
+             "mirror/metrics-server/metrics-server" "${METRICS_SERVER_IMAGE_TAG}"
 mirror_image "docker.io/grafana/grafana:${GRAFANA_IMAGE_TAG}" \
              "mirror/grafana/grafana" "${GRAFANA_IMAGE_TAG}"
 mirror_image "docker.io/nginxinc/nginx-unprivileged:${NGINX_IMAGE_TAG}" \
@@ -127,5 +133,6 @@ mirror_chart "grafana/mimir-distributed"        "${MIMIR_CHART_VERSION}"  "chart
 mirror_chart "grafana/loki"                     "${LOKI_CHART_VERSION}"   "charts/loki"
 mirror_chart "grafana/tempo"                    "${TEMPO_CHART_VERSION}"  "charts/tempo"
 mirror_chart "grafana/grafana"                  "${GRAFANA_CHART_VERSION}" "charts/grafana"
+mirror_chart "metrics-server/metrics-server"    "${METRICS_SERVER_CHART_VERSION}" "charts/metrics-server"
 
 log "done. registry: ${REGISTRY}"

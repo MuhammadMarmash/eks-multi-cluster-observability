@@ -10,16 +10,16 @@ already running.
 
 ## Read this first
 
-Five properties of the current deployment shape every procedure below. Four of them are
-deliberate trade-offs; the fifth is a gap.
+Five properties of the current deployment shape every procedure below. The first two are
+deliberate trade-offs; the last three are the guard rails that make the procedures safe.
 
 | Property | Where it comes from | What it means here |
 |---|---|---|
 | **`replication_factor = 1`** on all three backends | `lgtm_replication_factor`, ADR 0010 sizing | No ingester holds a copy of another's data. Restarting an ingester without flushing **loses every sample since its last block flush.** This is the single fact that drives the whole upgrade procedure |
 | **`kubernetes_version` is shared** by both clusters | `envs/prod/main.tf` lines 96 and 137 | Bumping the variable upgrades **both** control planes in one apply. Staging one cluster at a time needs `-target`, or a code change |
-| **No metrics-server** | `modules/eks/addons.tf` installs vpc-cni, kube-proxy, coredns, ebs-csi only | `kubectl top` does not work and a CPU/memory HPA **cannot function at all**. This is a prerequisite for Part 2, not a detail |
+| **metrics-server on both clusters** | `modules/metrics-server`, deployed from `envs/prod-platform` | `kubectl top` and CPU/memory HPAs work. Custom-metric scaling still needs KEDA — see Part 2 |
 | **Alloy retries for 5 minutes** | `max_elapsed_time = "5m"` in the agent's exporter | Cluster B can be unreachable for up to 5 minutes with no data loss. Past that, Cluster A drops telemetry on the floor |
-| **The gateway Alloy has no PDB and no anti-affinity** | `modules/telemetry-gateway` — neither is configured | Both replicas can be scheduled on one node, and a drain can evict both at once. **Ingest goes to zero during a node roll.** See [Gaps](#gaps-to-close) |
+| **The gateway Alloy has a PDB and required anti-affinity** | `modules/telemetry-gateway` — `maxUnavailable: 1`, `topologyKey: kubernetes.io/hostname` | Replicas cannot share a node and a drain cannot take both. This is what makes the bounded-gap claim above true rather than hopeful |
 
 ---
 
@@ -255,11 +255,11 @@ react to it**, which inverts the usual reflex to trigger late and conservatively
 *distributor* — stateless, safe to scale — and `ingester.kedaAutoscaling` is **null**. The
 absence is a design opinion, not an oversight.
 
-## Prerequisites we do not have
+## Prerequisites
 
 | Needed | Status | For |
 |---|---|---|
-| **metrics-server** | Not installed | Any CPU/memory HPA. Without it `kubectl top` fails and HPA reports `<unknown>` forever |
+| **metrics-server** | **Deployed** on both clusters | Any CPU/memory HPA. Without it `kubectl top` fails and HPA reports `<unknown>` forever |
 | **KEDA** or **prometheus-adapter** | Not installed | Custom metrics. KEDA is the better fit — it speaks PromQL directly and gives per-direction scaling policies |
 | **Mimir scraping itself** | Not configured | Every metric below comes from Mimir's own `/metrics`. Today only Cluster A's kubelets are scraped |
 
@@ -378,20 +378,28 @@ path fills before the storage path does.
 
 Found while writing this. All are real, none are blocking today, and each is small.
 
-1. **No PDB or anti-affinity on the gateway Alloy.** Both replicas can land on one node and a
-   single drain can evict both, taking ingest to zero. It is the one component whose outage
-   the 5-minute retry buffer is protecting against, and it is the least protected thing in
-   the platform. A `PodDisruptionBudget` with `maxUnavailable: 1` plus a
-   `topologySpreadConstraint` on `kubernetes.io/hostname` closes it.
-2. **`kubernetes_version` is shared by both clusters.** Staged upgrades need `-target` today.
+**Closed** — both were blocking the claims this document makes, and both are now in `main`:
+
+- ~~No PDB or anti-affinity on the gateway Alloy.~~ It now carries
+  `maxUnavailable: 1` and *required* anti-affinity on `kubernetes.io/hostname`, so a drain
+  cannot take both replicas and the bounded-gap claim in Step 3 holds. The PDB is gated on
+  `replicas > 1`: one on a single-replica Deployment would block every drain outright.
+- ~~No metrics-server.~~ `modules/metrics-server` is deployed to both clusters, so
+  `kubectl top` and CPU/memory HPAs work. Part 2 is now actionable rather than theoretical.
+
+**Still open**, in the order they are worth doing:
+
+1. **Cluster B does not observe itself.** Every autoscaling metric in Part 2 comes from
+   Mimir's own `/metrics`, and nothing currently scrapes it. This is the next real blocker
+   for ingester autoscaling — metrics-server covers CPU and memory, but the series-count
+   signal that actually matters does not exist yet. A `prometheus.scrape` of the `lgtm`
+   namespace added to the gateway's pipeline closes it.
+2. **KEDA is not installed.** Needed for the PromQL-driven `ScaledObject` above.
+   metrics-server alone gets you CPU-based scaling, which Part 2 argues is the wrong signal
+   for ingesters.
+3. **`kubernetes_version` is shared by both clusters.** Staged upgrades need `-target` today.
    Splitting it into `workload_kubernetes_version` and `observability_kubernetes_version`
-   removes the break-glass step from a routine procedure.
-3. **No metrics-server.** Blocks `kubectl top` and every HPA. It is a managed EKS add-on and
-   a three-line addition to `modules/eks/addons.tf`.
-4. **Cluster B does not observe itself.** Every autoscaling metric above comes from Mimir's
-   own `/metrics`, which nothing currently scrapes.
-5. **`replication_factor = 1`** makes Step 3b necessary at all. Raising it to 2 during
+   removes a break-glass step from a routine procedure.
+4. **`replication_factor = 1`** makes Step 3b necessary at all. Raising it to 2 during
    upgrades — or permanently, if the budget allows a fourth node — deletes the most
    error-prone procedure in this document.
-
-Items 1 and 3 are the two worth doing before the next upgrade.

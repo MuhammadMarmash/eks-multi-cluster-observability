@@ -188,3 +188,48 @@ run "no_unmirrored_sidecar" {
     error_message = "The config-reloader sidecar pulls an unmirrored quay.io image and reloads a config that only ever changes via a Helm release."
   }
 }
+
+# The gateway is the single ingest point for the whole pipeline, and the agent
+# on Cluster A only buffers for five minutes. Losing both replicas at once —
+# which an unconstrained node drain will happily do — is data loss, not a blip.
+run "a_node_drain_cannot_take_both_replicas" {
+  command = plan
+
+  assert {
+    condition     = output.values.controller.podDisruptionBudget.enabled == true
+    error_message = "With more than one replica the gateway needs a PDB, or a drain evicts every replica at once."
+  }
+
+  assert {
+    condition     = output.values.controller.podDisruptionBudget.maxUnavailable == 1
+    error_message = "At most one gateway replica may be unavailable during a voluntary disruption."
+  }
+
+  # `required`, not `preferred`: the soft form lets the scheduler co-locate
+  # replicas under pressure, which is exactly the state a node roll creates.
+  assert {
+    condition     = length(output.values.controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution) == 1
+    error_message = "Anti-affinity must be required, not preferred."
+  }
+
+  assert {
+    condition     = output.values.controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey == "kubernetes.io/hostname"
+    error_message = "Replicas must be spread across nodes; spreading by zone alone still allows two on one node."
+  }
+}
+
+# A PDB on a single-replica Deployment blocks every drain outright — the node
+# can never be evacuated. Gating on replicas > 1 is what keeps a scaled-down
+# gateway from wedging an upgrade.
+run "single_replica_gets_no_pdb" {
+  command = plan
+
+  variables {
+    replicas = 1
+  }
+
+  assert {
+    condition     = output.values.controller.podDisruptionBudget.enabled == false
+    error_message = "A PDB with maxUnavailable 1 on a single replica makes the node undrainable."
+  }
+}
