@@ -30,9 +30,9 @@ cluster_public_access_cidrs    = ["203.0.113.10/32"]
 # t3.medium and t3.large share the same 2 vCPU; the difference is memory only.
 node_instance_types = ["t3.medium"]
 
-# Cluster A (workload).
-node_desired_size = 2
-node_min_size     = 2
+# Cluster A (workload) — the Boutique's eleven services plus the Alloy DaemonSet.
+node_desired_size = 3
+node_min_size     = 3
 node_max_size     = 6
 
 # Cluster B (observability) carries the LGTM stack. Two t3.medium nodes yield

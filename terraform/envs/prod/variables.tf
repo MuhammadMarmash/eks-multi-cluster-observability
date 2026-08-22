@@ -133,15 +133,22 @@ variable "node_instance_types" {
 }
 
 variable "node_desired_size" {
-  description = "Desired node count per cluster."
+  description = <<-EOT
+    Desired node count for Cluster A (workload).
+
+    Three, matching Cluster B. Two t3.medium nodes give 4.75 GiB of ALLOCATABLE
+    memory once kube-reserved is taken out, and the Online Boutique's eleven
+    services plus the Alloy DaemonSet do not leave enough margin in that for a
+    node to go away.
+  EOT
   type        = number
-  default     = 2
+  default     = 3
 }
 
 variable "node_min_size" {
-  description = "Minimum node count per cluster."
+  description = "Minimum node count for Cluster A. Must not drop below what the Boutique needs to schedule."
   type        = number
-  default     = 2
+  default     = 3
 }
 
 variable "node_max_size" {

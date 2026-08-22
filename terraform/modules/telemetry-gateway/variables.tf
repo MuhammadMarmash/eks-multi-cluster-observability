@@ -68,9 +68,15 @@ variable "chart_version" {
   type        = string
 }
 
-variable "image_repository" {
-  description = "ECR repository holding the mirrored Alloy image."
+variable "image_registry" {
+  description = "ECR registry hostname. Kept separate from the repository path: the chart concatenates them, and an empty registry produces a leading slash and an invalid image reference."
   type        = string
+}
+
+variable "image_repository" {
+  description = "Repository path within the registry, e.g. mirror/grafana/alloy."
+  type        = string
+  default     = "mirror/grafana/alloy"
 }
 
 variable "image_tag" {

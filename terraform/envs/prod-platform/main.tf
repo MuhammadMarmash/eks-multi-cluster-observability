@@ -7,6 +7,7 @@
 #   telemetry-gateway   x1  -> Cluster B, TLS + auth + fan-out
 #   telemetry-agent     x1  -> Cluster A, collects and ships
 #   lgtm-backends       x1  -> Cluster B, Mimir + Loki + Tempo on S3
+#   grafana             x1  -> Cluster B, the single pane of glass
 #
 # Modules never call each other. This file is the only place the two clusters
 # meet, and it is the only place that knows the gateway's name, CA and
@@ -110,21 +111,30 @@ module "gateway" {
 
   chart_repository = local.chart_registry
   chart_version    = var.alloy_chart_version
-  image_repository = "${local.registry}/mirror/grafana/alloy"
+  image_registry   = local.registry
+  image_repository = "mirror/grafana/alloy"
   image_tag        = var.alloy_image_tag
 
   replicas = var.gateway_replicas
 
+  # The fan-out targets come from the backends themselves rather than from
+  # variables, so a service rename cannot silently leave the gateway writing
+  # into the void. Tempo's endpoint in particular changed when it moved to the
+  # single-binary chart.
   lgtm_enabled   = var.lgtm_enabled
-  mimir_endpoint = var.mimir_endpoint
-  loki_endpoint  = var.loki_endpoint
-  tempo_endpoint = var.tempo_endpoint
+  mimir_endpoint = module.lgtm_backends.mimir_otlp_endpoint
+  loki_endpoint  = module.lgtm_backends.loki_otlp_endpoint
+  tempo_endpoint = module.lgtm_backends.tempo_otlp_endpoint
 
   tags = local.common_tags
 
   depends_on = [
     module.lb_controller,
     module.cert_manager,
+    # Not strictly required — Alloy retries a refused exporter — but it keeps a
+    # first apply from filling the gateway's logs with connection errors while
+    # the backends are still coming up.
+    module.lgtm_backends,
   ]
 }
 
@@ -154,7 +164,8 @@ module "agent" {
 
   chart_repository = local.chart_registry
   chart_version    = var.alloy_chart_version
-  image_repository = "${local.registry}/mirror/grafana/alloy"
+  image_registry   = local.registry
+  image_repository = "mirror/grafana/alloy"
   image_tag        = var.alloy_image_tag
 
   scrape_interval = var.scrape_interval
@@ -198,4 +209,37 @@ module "lgtm_backends" {
   replication_factor = var.lgtm_replication_factor
   ingester_replicas  = var.lgtm_ingester_replicas
   enable_caches      = var.lgtm_enable_caches
+}
+
+###############################################################################
+# 6. GRAFANA — Cluster B
+#
+# Shares the LGTM namespace, which is why it does not create it. Reads through
+# the three backends' HTTP APIs and holds no AWS credential of any kind.
+#
+# Mimir and Loki are queried through their nginx gateways rather than their
+# query-frontends: the Mimir gateway injects the X-Scope-OrgID tenant header,
+# without which Mimir rejects every query.
+###############################################################################
+
+module "grafana" {
+  source = "../../modules/grafana"
+
+  providers = {
+    helm       = helm.observability
+    kubernetes = kubernetes.observability
+  }
+
+  namespace        = module.lgtm_backends.namespace
+  create_namespace = false # lgtm-backends owns it
+
+  datasource_urls = module.lgtm_backends.query_endpoints
+
+  chart_repository = local.chart_registry
+  chart_version    = var.grafana_chart_version
+  image_registry   = local.registry
+  image_repository = "mirror/grafana/grafana"
+  image_tag        = var.grafana_image_tag
+
+  depends_on = [module.lgtm_backends]
 }
