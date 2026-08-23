@@ -22,6 +22,15 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULE="${REPO_ROOT}/terraform/modules/lgtm-backends"
+# Render against the Kubernetes version these charts are actually deployed to.
+#
+# `helm template` otherwise validates kubeVersion constraints against whatever
+# the LOCAL helm binary defaults to, which differs between helm releases: 3.16
+# assumes v1.31 and fails mimir-distributed's "^1.32.0-0" constraint, while a
+# newer helm passes. That turns a chart compatibility check into a check of
+# which helm the runner happens to have.
+KUBE_VERSION="${KUBE_VERSION:-1.34.0}"
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -71,6 +80,7 @@ yaml.safe_dump(json.load(open('${WORKDIR}/${component}.json')), open('${WORKDIR}
 
   if ! helm template "$component" "${WORKDIR}/${chart}" \
         -f "${WORKDIR}/${component}.yaml" --namespace lgtm \
+        --kube-version "$KUBE_VERSION" \
         > "${WORKDIR}/${component}-rendered.yaml" 2>"${WORKDIR}/${component}.err"; then
     printf '  \033[31mFAIL\033[0m %s render\n' "$component"
     sed 's/^/       /' "${WORKDIR}/${component}.err" | head -10
@@ -163,13 +173,13 @@ for p in problems:
 print(f"\n  footprint: {totals['pods']} pods, "
       f"{totals['cpu']:.2f} vCPU, {totals['mem']/1024:.2f} GiB requested")
 # 2 x t3.large allocatable, after kubelet and system reservations.
-# Cluster B: 3 x t3.medium. EKS reserves 255Mi + 11Mi*max_pods per node, and
-# prefix delegation puts max_pods at 110, so kube-reserved is 1465Mi per node
-# whatever the instance size. Allocatable is 2.37 GiB/node, not 4.
-NODES, PER_NODE_MEM_GIB, PER_NODE_CPU = 3, 2.373, 1.930
+# Cluster B: 2 x m7i-flex.large. EKS reserves 255Mi + 11Mi*max_pods per node,
+# and prefix delegation puts max_pods at 110, so kube-reserved is 1465Mi per
+# node whatever the instance size — 6.37 GiB allocatable out of 8, not 8.
+NODES, PER_NODE_MEM_GIB, PER_NODE_CPU = 2, 6.374, 1.930
 cap_m, cap_c = NODES*PER_NODE_MEM_GIB, NODES*PER_NODE_CPU
 used_m = totals['mem']/1024
-print(f"  against {NODES} x t3.medium ({cap_c:.2f} vCPU / {cap_m:.2f} GiB allocatable): "
+print(f"  against {NODES} x m7i-flex.large ({cap_c:.2f} vCPU / {cap_m:.2f} GiB allocatable): "
       f"CPU {totals['cpu']/cap_c*100:.0f}%, MEM {used_m/cap_m*100:.0f}%")
 # The gateway, cert-manager, the LB controller and the system DaemonSets also
 # have to fit. Measured headroom, not a guess.
