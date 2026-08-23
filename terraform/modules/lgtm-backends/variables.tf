@@ -215,3 +215,16 @@ variable "log_level" {
     error_message = "log_level must be one of debug, info, warn, error."
   }
 }
+
+variable "mimir_push_endpoint" {
+  description = <<-EOT
+    Prometheus remote-write endpoint that Tempo's metrics generator pushes span
+    and service-graph metrics to.
+
+    Through Mimir's gateway rather than its distributor: the gateway injects the
+    X-Scope-OrgID tenant header, and Mimir rejects a write without one with
+    "401: no org id".
+  EOT
+  type        = string
+  default     = "http://mimir-gateway.lgtm.svc.cluster.local/api/v1/push"
+}

@@ -327,3 +327,34 @@ run "read_endpoints_go_through_the_tenant_injecting_gateway" {
     error_message = "Metric writes must also carry a tenant header."
   }
 }
+
+# Grafana's Service Graph and the RED panels on the Tempo datasource read span
+# metrics from the PROMETHEUS datasource, not from Tempo. Without the metrics
+# generator those metrics never exist, so a perfectly-wired serviceMap shows
+# "no data" forever and nothing in the Tempo config hints at why.
+run "span_metrics_are_generated_for_the_service_graph" {
+  command = plan
+
+  assert {
+    condition     = output.tempo_values.tempo.metricsGenerator.enabled == true
+    error_message = "Without the metrics generator, Grafana's Service Graph has no data source to read."
+  }
+
+  # Enabling the generator is not enough; which processors run is a per-tenant
+  # override defaulting to none.
+  assert {
+    condition     = contains(output.tempo_values.tempo.overrides.defaults.metrics_generator.processors, "service-graphs")
+    error_message = "The service-graphs processor must be enabled, or no graph is produced."
+  }
+
+  assert {
+    condition     = contains(output.tempo_values.tempo.overrides.defaults.metrics_generator.processors, "span-metrics")
+    error_message = "The span-metrics processor produces the RED metrics on the Tempo datasource."
+  }
+
+  # Straight to the distributor and Mimir answers 401 for every write.
+  assert {
+    condition     = strcontains(output.tempo_values.tempo.metricsGenerator.remoteWriteUrl, "mimir-gateway")
+    error_message = "Generated metrics must be written through Mimir's tenant-injecting gateway."
+  }
+}

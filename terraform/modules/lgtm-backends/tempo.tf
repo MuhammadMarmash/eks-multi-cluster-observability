@@ -25,6 +25,28 @@ locals {
       repository = "mirror/grafana/tempo"
       tag        = var.tempo_image_tag
 
+      # Generates span metrics and service-graph metrics from spans and
+      # remote-writes them to Mimir. Grafana's Service Graph and the RED panels
+      # on the Tempo datasource read those from the PROMETHEUS datasource, not
+      # from Tempo — so with this off the datasource is wired correctly and the
+      # Service Graph is permanently "no data".
+      metricsGenerator = {
+        enabled = true
+        # Mimir's gateway, not its distributor: the gateway injects the
+        # X-Scope-OrgID tenant header and Mimir rejects a write without one.
+        remoteWriteUrl = var.mimir_push_endpoint
+      }
+
+      # Enabling the generator is not enough. Which processors it runs is a
+      # per-tenant override, and the default is none.
+      overrides = {
+        defaults = {
+          metrics_generator = {
+            processors = ["service-graphs", "span-metrics"]
+          }
+        }
+      }
+
       storage = {
         trace = {
           # Default is "local" — a node disk. Left alone every trace dies with
