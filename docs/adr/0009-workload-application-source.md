@@ -1,8 +1,46 @@
 # ADR 0009 — The workload application on Cluster A
 
-**Status:** Accepted
+**Status:** Superseded by the decision recorded below, 2026-08-23
 **Date:** 2026-08-21
-**Implemented by:** *(pending — the Cluster A application deployment)*
+**Implemented by:** `terraform/modules/workload-app`
+
+> ## Superseded: the pinned fork publishes no images
+>
+> The original decision below verified that
+> `julianocosta89/opentelemetry-microservices-demo` is OTLP-instrumented. It did not
+> verify that anything **publishes built images** for it, and nothing does. Its manifests
+> carry placeholder image names (`image: frontend`) and it builds all eleven services from
+> source through a 2021-era Skaffold config spanning Go, C#, Python, Node and Java. Its
+> services also point at a bundled `otelcollector:4317` rather than at an injectable
+> endpoint.
+>
+> Deploying it means running that build, which is hours of work across five toolchains with
+> a real chance the 2021 config no longer builds on current ones.
+>
+> **The workload application is now `open-telemetry/opentelemetry-demo`**, deployed from the
+> `opentelemetry-demo` Helm chart (0.41.0, appVersion 3.0.0):
+>
+> - It publishes prebuilt instrumented images to `ghcr.io/open-telemetry/demo`, all fifteen
+>   services sharing one repository and differing only by tag — three mirrored ECR
+>   repositories rather than seventeen.
+> - Every service builds its OTLP endpoint from a single `OTEL_COLLECTOR_NAME` variable, so
+>   pointing the whole application at the Alloy agent is one value.
+> - It emits traces, metrics **and** logs over OTLP natively, where the Boutique emits
+>   traces only.
+> - It is actively maintained by the OpenTelemetry project.
+>
+> **What this costs:** it is the Astronomy Shop, not the Online Boutique the brief names by
+> name. The brief's *intent* — an OTLP-instrumented microservices demo whose telemetry
+> proves the pipeline — is met better; its *letter* is not. That trade is deliberate and is
+> recorded here rather than left for a reader to discover.
+>
+> The chart's own Jaeger, Prometheus, Grafana and OpenSearch are disabled. That stack is the
+> point of the upstream demo and entirely redundant here: this platform *is* the
+> observability stack, in another cluster, which is the thing being demonstrated.
+>
+> **The lesson worth keeping:** "is it instrumented?" was the wrong question to stop at. The
+> question that decides whether a dependency is usable is "can I obtain it without building
+> it?", and it costs one look at the manifests to answer.
 
 ## Context
 

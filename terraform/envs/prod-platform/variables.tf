@@ -136,6 +136,26 @@ variable "metrics_server_image_tag" {
   default     = "v0.9.0"
 }
 
+# --- Workload application --------------------------------------------------------
+
+variable "workload_app_namespace" {
+  description = "Namespace the instrumented application runs in on Cluster A."
+  type        = string
+  default     = "boutique"
+}
+
+variable "otel_demo_chart_version" {
+  description = "opentelemetry-demo chart version. Matches scripts/mirror-images.sh."
+  type        = string
+  default     = "0.41.0"
+}
+
+variable "otel_demo_version" {
+  description = "Demo appVersion; every service image is this plus a component suffix."
+  type        = string
+  default     = "3.0.0"
+}
+
 # --- LGTM backends -------------------------------------------------------------
 
 variable "mimir_chart_version" {

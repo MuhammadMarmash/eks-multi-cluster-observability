@@ -252,6 +252,14 @@ variable "ecr_repositories" {
     "charts/tempo"                         = { description = "Tempo OCI Helm chart, single-binary" }
     "charts/grafana"                       = { description = "Grafana OCI Helm chart" }
     "charts/metrics-server"                = { description = "metrics-server OCI Helm chart" }
+
+    # The workload application on Cluster A (ADR 0009). All fifteen demo
+    # services share one repository and differ only by tag, so this is three
+    # repositories rather than seventeen.
+    "mirror/otel-demo"          = { description = "OpenTelemetry demo services, one tag per component" }
+    "mirror/open-feature/flagd" = { description = "flagd, the demo's feature-flag service" }
+    "mirror/valkey-io/valkey"   = { description = "Valkey, the demo's cart backing store" }
+    "charts/opentelemetry-demo" = { description = "OpenTelemetry demo OCI Helm chart" }
   }
 }
 

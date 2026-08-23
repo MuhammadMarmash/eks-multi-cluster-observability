@@ -74,6 +74,16 @@ output "grafana_admin_password" {
   sensitive   = true
 }
 
+output "workload_app_namespace" {
+  description = "Namespace the instrumented application runs in on Cluster A."
+  value       = module.workload_app.namespace
+}
+
+output "workload_app_frontend" {
+  description = "Reach the storefront. The load generator drives traffic without it."
+  value       = module.workload_app.frontend_port_forward
+}
+
 # The runbook's checks, rendered with this deployment's actual names so they
 # can be copied and run without editing.
 output "verification" {

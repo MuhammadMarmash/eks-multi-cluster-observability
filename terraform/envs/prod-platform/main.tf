@@ -10,6 +10,7 @@
 #   grafana             x1  -> Cluster B, the single pane of glass
 #   metrics-server      x2  -> BOTH clusters, so an HPA can function at all
 #   storage-class       x2  -> BOTH clusters, a CSI-backed default for PVCs
+#   workload-app        x1  -> Cluster A, the instrumented application
 #
 # Modules never call each other. This file is the only place the two clusters
 # meet, and it is the only place that knows the gateway's name, CA and
@@ -319,4 +320,38 @@ module "storage_class_observability" {
   providers = {
     kubernetes = kubernetes.observability
   }
+}
+
+###############################################################################
+# 9. THE WORKLOAD APPLICATION — Cluster A
+#
+# The thing the platform exists to observe. Without it the agent has kubelet
+# metrics and pod logs to ship and no traces at all.
+#
+# It talks to the Alloy agent beside it and knows nothing about Cluster B, the
+# peering link or the gateway. That is the whole point of the agent: the
+# application exports OTLP to localhost-ish and the platform does the rest.
+#
+#   docs/adr/0009-workload-application-source.md
+###############################################################################
+
+module "workload_app" {
+  source = "../../modules/workload-app"
+
+  providers = {
+    helm       = helm.workload
+    kubernetes = kubernetes.workload
+  }
+
+  namespace = var.workload_app_namespace
+
+  # Host only — the chart appends the port.
+  agent_otlp_endpoint = "alloy-agent.${var.telemetry_namespace}.svc.cluster.local"
+
+  chart_repository = local.chart_registry
+  chart_version    = var.otel_demo_chart_version
+  image_registry   = local.registry
+  app_version      = var.otel_demo_version
+
+  depends_on = [module.agent]
 }

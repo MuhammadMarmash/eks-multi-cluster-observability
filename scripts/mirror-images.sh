@@ -39,6 +39,14 @@ GRAFANA_CHART_VERSION="10.5.15"
 GRAFANA_IMAGE_TAG="12.3.1"
 METRICS_SERVER_CHART_VERSION="3.14.0"
 METRICS_SERVER_IMAGE_TAG="v0.9.0"
+
+# The workload application (ADR 0009).
+OTEL_DEMO_CHART_VERSION="0.41.0"
+OTEL_DEMO_VERSION="3.0.0"
+FLAGD_IMAGE_TAG="v0.16.0"
+VALKEY_IMAGE_TAG="9.0.4-alpine3.23"
+# Every demo service is one tag of a single repository.
+OTEL_DEMO_COMPONENTS="ad agent cart checkout currency email flagd-ui frontend frontend-proxy load-generator payment product-catalog quote recommendation shipping"
 NGINX_IMAGE_TAG="1.29-alpine"
 
 log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
@@ -111,6 +119,7 @@ helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
 helm repo add eks https://aws.github.io/eks-charts >/dev/null
 helm repo add jetstack https://charts.jetstack.io >/dev/null
 helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts >/dev/null
 helm repo update >/dev/null
 
 mirror_image "docker.io/grafana/alloy:${ALLOY_IMAGE_TAG}" \
@@ -139,6 +148,15 @@ mirror_image "docker.io/grafana/grafana:${GRAFANA_IMAGE_TAG}" \
 mirror_image "docker.io/nginxinc/nginx-unprivileged:${NGINX_IMAGE_TAG}" \
              "mirror/nginxinc/nginx-unprivileged" "${NGINX_IMAGE_TAG}"
 
+for c in ${OTEL_DEMO_COMPONENTS}; do
+  mirror_image "ghcr.io/open-telemetry/demo:${OTEL_DEMO_VERSION}-${c}" \
+               "mirror/otel-demo" "${OTEL_DEMO_VERSION}-${c}"
+done
+mirror_image "ghcr.io/open-feature/flagd:${FLAGD_IMAGE_TAG}" \
+             "mirror/open-feature/flagd" "${FLAGD_IMAGE_TAG}"
+mirror_image "ghcr.io/valkey-io/valkey:${VALKEY_IMAGE_TAG}" \
+             "mirror/valkey-io/valkey" "${VALKEY_IMAGE_TAG}"
+
 mirror_chart "grafana/alloy"                    "${ALLOY_CHART_VERSION}"  "charts/alloy"
 mirror_chart "eks/aws-load-balancer-controller" "${ALB_CHART_VERSION}"    "charts/aws-load-balancer-controller"
 mirror_chart "jetstack/cert-manager"            "${CERT_MANAGER_VERSION}" "charts/cert-manager"
@@ -147,5 +165,6 @@ mirror_chart "grafana/loki"                     "${LOKI_CHART_VERSION}"   "chart
 mirror_chart "grafana/tempo"                    "${TEMPO_CHART_VERSION}"  "charts/tempo"
 mirror_chart "grafana/grafana"                  "${GRAFANA_CHART_VERSION}" "charts/grafana"
 mirror_chart "metrics-server/metrics-server"    "${METRICS_SERVER_CHART_VERSION}" "charts/metrics-server"
+mirror_chart "open-telemetry/opentelemetry-demo" "${OTEL_DEMO_CHART_VERSION}" "charts/opentelemetry-demo"
 
 log "done. registry: ${REGISTRY}"
