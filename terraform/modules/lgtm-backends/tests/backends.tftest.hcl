@@ -300,3 +300,30 @@ run "no_unmirrored_sidecar_containers" {
     error_message = "The Loki ruler sidecar pulls from Docker Hub and watches rules this platform does not define."
   }
 }
+
+# This assertion belongs HERE, in the module that PRODUCES the endpoints. The
+# equivalent check in modules/grafana asserts on a URL supplied as its own test
+# input, so it passes regardless of what this module actually emits — it tests
+# the test data, not the wiring.
+run "read_endpoints_go_through_the_tenant_injecting_gateway" {
+  command = plan
+
+  # Mimir is multi-tenant by default and answers "401: no org id" to any
+  # request without an X-Scope-OrgID header. Its nginx gateway injects one;
+  # the query-frontend does not.
+  assert {
+    condition     = strcontains(output.query_endpoints.mimir, "mimir-gateway")
+    error_message = "Mimir must be queried through its gateway; the query-frontend rejects every request with 401: no org id."
+  }
+
+  assert {
+    condition     = !strcontains(output.query_endpoints.mimir, "query-frontend")
+    error_message = "Querying the Mimir query-frontend directly bypasses tenant-header injection."
+  }
+
+  # Same reasoning for the write path, which already goes via the gateway.
+  assert {
+    condition     = strcontains(output.mimir_otlp_endpoint, "mimir-gateway")
+    error_message = "Metric writes must also carry a tenant header."
+  }
+}

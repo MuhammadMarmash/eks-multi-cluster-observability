@@ -31,7 +31,12 @@ output "tempo_otlp_endpoint" {
 output "query_endpoints" {
   description = "In-cluster read endpoints, keyed by component. Grafana's datasources point here."
   value = {
-    mimir = "http://mimir-query-frontend.${var.namespace}.svc.cluster.local:8080/prometheus"
+    # Through the nginx gateway, NOT the query-frontend. Mimir runs
+    # multi-tenant by default and rejects any request without an X-Scope-OrgID
+    # header with "401: no org id". The gateway injects it, defaulting to the
+    # no-auth tenant; the query-frontend does not, so querying it directly
+    # fails every request.
+    mimir = "http://mimir-gateway.${var.namespace}.svc.cluster.local/prometheus"
     loki  = "http://loki-gateway.${var.namespace}.svc.cluster.local"
     tempo = "http://tempo.${var.namespace}.svc.cluster.local:3200"
   }
