@@ -67,13 +67,12 @@ locals {
     components = merge(
       { for c in var.disabled_components : c => { enabled = false } },
       {
+        # imageOverride ONLY. Helm REPLACES lists rather than merging them, so
+        # setting sidecarContainers here discards the chart's flagd-ui sidecar
+        # along with the useDefault block it carries. That surfaces as "nil
+        # pointer evaluating interface {}.env", naming neither the list nor the
+        # component. The sidecar's image already resolves through default.image.
         flagd = {
-          sidecarContainers = [
-            {
-              name    = "flagdui"
-              service = { port = 4000 }
-            },
-          ]
           imageOverride = {
             repository = "${var.image_registry}/mirror/open-feature/flagd"
             tag        = var.flagd_image_tag
@@ -83,6 +82,12 @@ locals {
           imageOverride = {
             repository = "${var.image_registry}/mirror/valkey-io/valkey"
             tag        = var.valkey_image_tag
+          }
+        }
+        "astronomy-db" = {
+          imageOverride = {
+            repository = "${var.image_registry}/mirror/postgres"
+            tag        = var.postgres_image_tag
           }
         }
       },

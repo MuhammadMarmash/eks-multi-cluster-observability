@@ -260,6 +260,7 @@ variable "ecr_repositories" {
     "mirror/open-feature/flagd" = { description = "flagd, the demo's feature-flag service" }
     "mirror/valkey-io/valkey"   = { description = "Valkey, the demo's cart backing store" }
     "charts/opentelemetry-demo" = { description = "OpenTelemetry demo OCI Helm chart" }
+    "mirror/postgres"           = { description = "PostgreSQL, the demo product-catalog backing store" }
   }
 }
 

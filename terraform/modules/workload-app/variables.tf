@@ -47,6 +47,12 @@ variable "flagd_image_tag" {
   default     = "v0.16.0"
 }
 
+variable "postgres_image_tag" {
+  description = "PostgreSQL image tag, backing product-catalog."
+  type        = string
+  default     = "18.4"
+}
+
 variable "valkey_image_tag" {
   description = "Valkey image tag."
   type        = string
@@ -63,8 +69,13 @@ variable "disabled_components" {
     accounting and fraud-detection only read from it.
   EOT
   type        = list(string)
+  # astronomy-db and kafka are deliberately NOT here. product-catalog and
+  # checkout each block on an init container that waits for one of them, so
+  # disabling either leaves those services in Init forever and removes the
+  # storefront's most interesting traces. accounting and fraud-detection only
+  # CONSUME from Kafka, so they can go without affecting checkout.
   default = [
     "chatbot", "mcp", "firepit", "opamp-server", "telemetry-docs",
-    "accounting", "fraud-detection", "kafka", "astronomy-db", "image-provider",
+    "accounting", "fraud-detection", "image-provider",
   ]
 }

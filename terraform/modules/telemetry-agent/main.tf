@@ -38,6 +38,26 @@ locals {
       # not a default that quietly admits anything.
       stabilityLevel = "generally-available"
 
+      # The OTLP receiver listens on these inside the container, but the
+      # chart's Service exposes only Alloy's own UI port. Without them
+      # alloy-agent.<ns>.svc.cluster.local:4317 resolves to a Service with no
+      # such port, and every application export is refused — while Alloy's own
+      # export counters stay clean, because nothing ever reached it.
+      extraPorts = [
+        {
+          name       = "otlp-grpc"
+          port       = 4317
+          targetPort = 4317
+          protocol   = "TCP"
+        },
+        {
+          name       = "otlp-http"
+          port       = 4318
+          targetPort = 4318
+          protocol   = "TCP"
+        },
+      ]
+
       extraEnv = [
         {
           # HOSTNAME inside a pod is the POD's name. Node-scoped discovery

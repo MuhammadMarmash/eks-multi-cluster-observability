@@ -45,8 +45,9 @@ OTEL_DEMO_CHART_VERSION="0.41.0"
 OTEL_DEMO_VERSION="3.0.0"
 FLAGD_IMAGE_TAG="v0.16.0"
 VALKEY_IMAGE_TAG="9.0.4-alpine3.23"
+POSTGRES_IMAGE_TAG="18.4"
 # Every demo service is one tag of a single repository.
-OTEL_DEMO_COMPONENTS="ad agent cart checkout currency email flagd-ui frontend frontend-proxy load-generator payment product-catalog quote recommendation shipping"
+OTEL_DEMO_COMPONENTS="ad agent cart checkout currency email flagd-ui frontend frontend-proxy kafka load-generator payment product-catalog quote recommendation shipping"
 NGINX_IMAGE_TAG="1.29-alpine"
 
 log()  { printf '\033[36m==> %s\033[0m\n' "$*"; }
@@ -91,7 +92,31 @@ mirror_image() {
     return 0
   fi
   log "image ${src} -> ${REGISTRY}/${repo}:${tag}"
-  docker buildx imagetools create --tag "${REGISTRY}/${repo}:${tag}" "$src"
+
+  # Copy ONLY linux/amd64. Every node here is x86_64, so copying the arm64 and
+  # armv7 variants triples the transfer for layers nothing will ever pull. On
+  # the larger demo images that is the difference between a few minutes each
+  # and well under one.
+  local src_repo="${src%%:*}" digest
+  digest="$(docker buildx imagetools inspect "$src" --raw 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for m in d.get('manifests', []):
+    p = m.get('platform', {})
+    if p.get('os') == 'linux' and p.get('architecture') == 'amd64':
+        print(m['digest'])
+        break
+" 2>/dev/null || true)"
+
+  if [ -n "$digest" ]; then
+    docker buildx imagetools create --tag "${REGISTRY}/${repo}:${tag}" "${src_repo}@${digest}"
+  else
+    # Single-platform image: there is no index to select from.
+    docker buildx imagetools create --tag "${REGISTRY}/${repo}:${tag}" "$src"
+  fi
 }
 
 mirror_chart() {
@@ -156,6 +181,8 @@ mirror_image "ghcr.io/open-feature/flagd:${FLAGD_IMAGE_TAG}" \
              "mirror/open-feature/flagd" "${FLAGD_IMAGE_TAG}"
 mirror_image "ghcr.io/valkey-io/valkey:${VALKEY_IMAGE_TAG}" \
              "mirror/valkey-io/valkey" "${VALKEY_IMAGE_TAG}"
+mirror_image "docker.io/library/postgres:${POSTGRES_IMAGE_TAG}" \
+             "mirror/postgres" "${POSTGRES_IMAGE_TAG}"
 
 mirror_chart "grafana/alloy"                    "${ALLOY_CHART_VERSION}"  "charts/alloy"
 mirror_chart "eks/aws-load-balancer-controller" "${ALB_CHART_VERSION}"    "charts/aws-load-balancer-controller"

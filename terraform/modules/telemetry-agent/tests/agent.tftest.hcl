@@ -172,3 +172,21 @@ run "no_unmirrored_sidecar" {
     error_message = "The config-reloader sidecar pulls an unmirrored quay.io image and reloads a config that only ever changes via a Helm release."
   }
 }
+
+# The OTLP receiver binds 4317/4318 inside the container, but the chart's
+# Service exposes only Alloy's UI port. Without these the application's exports
+# hit a Service with no such port — and the agent's own export counters stay
+# clean, because nothing ever arrives.
+run "otlp_receiver_ports_are_reachable_in_cluster" {
+  command = plan
+
+  assert {
+    condition     = length([for p in output.values.alloy.extraPorts : p if p.port == 4317]) == 1
+    error_message = "The Service must expose 4317, or nothing in the cluster can send OTLP to the agent."
+  }
+
+  assert {
+    condition     = length([for p in output.values.alloy.extraPorts : p if p.port == 4318]) == 1
+    error_message = "The Service must expose 4318 for OTLP/HTTP."
+  }
+}
