@@ -1,0 +1,14 @@
+Evidence captured 2026-08-23 08:08 UTC against account 284483510847, eu-west-1.
+
+$ # Which clusters have reported metrics to Mimir in Cluster B?
+$ curl -s http://mimir-gateway.lgtm.svc.cluster.local/prometheus/api/v1/label/cluster/values
+{"status":"success","data":["obs-platform-prod-workload"]}
+
+$ # Durable objects written to S3 by each backend
+s3://obs-platform-prod-mimir-284483510847  38 objects
+s3://obs-platform-prod-loki-284483510847  8 objects
+s3://obs-platform-prod-tempo-284483510847  1 objects
+
+$ # NLB target health (the cross-cluster ingress point)
+healthy	10.1.0.29
+healthy	10.1.28.54

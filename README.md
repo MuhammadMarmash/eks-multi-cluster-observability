@@ -252,8 +252,17 @@ concurrency lock.
 
 ## Proof of life
 
-> A Grafana dashboard in Cluster B showing traces and metrics originating from the Boutique
-> services in Cluster A. Screenshot to be added after the first full apply.
+![Mimir in Cluster B showing metrics from Cluster A](docs/proof-of-life/01-mimir-metrics-from-cluster-a.png)
+
+Grafana in **Cluster B**, querying **Mimir**, showing a series labelled
+`obs-platform-prod-workload`. That label is stamped by the Alloy agent on Cluster A and by
+nothing else — so the data crossed the peering link, authenticated at the gateway, and was
+written to S3.
+
+Metrics and logs are flowing. **Traces are not yet**, because no application is deployed on
+Cluster A to emit them; the agent has kubelet metrics and pod logs to ship, but no OTLP
+source. [`docs/proof-of-life/`](docs/proof-of-life/) states exactly what is and is not
+demonstrated, and what closes the gap.
 
 ---
 
