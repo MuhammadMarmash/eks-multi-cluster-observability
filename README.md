@@ -97,7 +97,7 @@ GitHub Actions · OIDC (no static credentials) · GitHub Environments as approva
 - **Exactly two ports cross the peering link.** Alloy converts Prometheus scrapes and pod-log
   tails into OTLP *in-process*, so all three signals leave on one authenticated connection.
   ([ADR 0006](docs/adr/0006-telemetry-agent-selection.md))
-- **69 assertions that need no AWS account.** Every module ships `terraform test` files
+- **81 assertions that need no AWS account.** Every module ships `terraform test` files
   running under `mock_provider`, plus scripts that render every Helm values file against the
   real upstream charts and validate every Alloy config with the real Alloy binary.
 
@@ -211,7 +211,7 @@ designed.
 ```bash
 cd terraform
 make validate         # all three root modules
-make test             # 69 assertions across 10 modules, offline via mock_provider
+make test             # 81 assertions across 12 modules, offline via mock_provider
 make alloy-validate   # renders each .alloy template, validates with the real Alloy binary
 make lgtm-validate    # renders LGTM values against the real upstream charts
 ```
@@ -236,9 +236,12 @@ flowchart LR
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| [`ci.yaml`](.github/workflows/ci.yaml) | PR, branch push | fmt · validate · 69 assertions · chart renders · Alloy validation · infra plan |
+| [`ci.yaml`](.github/workflows/ci.yaml) | PR, branch push | fmt · validate · 81 assertions · chart renders · Alloy validation · infra plan |
 | [`deploy.yaml`](.github/workflows/deploy.yaml) | push to `main`, manual | the gated chain above |
 | [`destroy.yaml`](.github/workflows/destroy.yaml) | manual only | teardown, platform first, typed confirmation |
+
+Both workflows also run `check-aws-string-constraints.sh` and `check-mirror-repos.sh` —
+guards written after live failures, described in Lessons learned.
 
 Three roles: **plan** (read-only), **apply** (only assumable from a protected Environment),
 **ecr-push** (`main` only — `mirror-images.sh` is in-tree, so a PR must not decide what lands
@@ -277,6 +280,13 @@ so kube-reserved is **1465 MiB per node regardless of instance size** — 18% of
 naive reading gives, and the LGTM stack does not fit. The fix was three nodes rather than two,
 which still costs less than the two t3.large it replaced. Since both instance types have the
 same 2 vCPU, the downgrade cost memory only.
+
+The account then had the last word: it is on the AWS Free Plan, which rejects `RunInstances`
+for any type that is not free-tier-eligible — including `t3.medium`. The node group sat in
+`CREATING` for the full 30-minute timeout with an empty `health.issues` and no Auto Scaling
+group, and the reason appeared only in CloudTrail. The platform runs on `m7i-flex.large`,
+which *is* eligible and carries 8 GiB, so the constraint that looked like a blocker produced
+a better answer than the original plan.
 
 **2. Helm ignores keys it does not recognise — silently.**
 Rendering every values file against the real upstream charts (`make lgtm-validate`) caught

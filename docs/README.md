@@ -22,6 +22,6 @@ the decision, what it costs us, and what was rejected.
 
 - [`RUNBOOK-telemetry.md`](RUNBOOK-telemetry.md) — deploy, verify and troubleshoot the telemetry pipeline
 - [`runbooks/day-2-ops.md`](runbooks/day-2-ops.md) — EKS upgrades and Mimir ingester autoscaling
-- [`proof-of-life/`](proof-of-life/) — evidence the pipeline works, and what it does not yet show
+- [`proof-of-life/`](proof-of-life/) — screenshots and API evidence for all three signals
 - [`../terraform/README.md`](../terraform/README.md) — module layout, runbook, cost table
 - [`../FINAL_PROJECT_MISSION.md`](../FINAL_PROJECT_MISSION.md) — the original brief

@@ -24,11 +24,17 @@ terraform/
     ├── eks/                # Cluster, node group, IRSA/OIDC, add-ons        (x2)
     ├── ecr/                # Private registry for images and OCI Helm charts (x1)
     ├── irsa/               # Generic IRSA role factory — one role, one ServiceAccount
+    ├── lgtm-storage/       # S3 buckets + per-signal IRSA roles             (x1, stage 1)
     ├── dns-private-zone/   # Route 53 private zone associated with BOTH VPCs (x1)
     ├── aws-lb-controller/  # AWS Load Balancer Controller + its IRSA role    (Cluster B)
     ├── cert-manager/       # cert-manager, issues the gateway certificate    (Cluster B)
+    ├── storage-class/      # CSI-backed default StorageClass                 (x2)
+    ├── metrics-server/     # Resource metrics API, so an HPA can function    (x2)
     ├── telemetry-gateway/  # Gateway Alloy, internal NLB, TLS + auth         (Cluster B)
-    └── telemetry-agent/    # Alloy DaemonSet, collects and ships             (Cluster A)
+    ├── telemetry-agent/    # Alloy DaemonSet, collects and ships             (Cluster A)
+    ├── lgtm-backends/      # Mimir, Loki, Tempo on S3                        (Cluster B)
+    ├── grafana/            # The single pane of glass                        (Cluster B)
+    └── workload-app/       # The instrumented application                    (Cluster A)
 ```
 
 Modules never call each other. Each root module's `main.tf` is the only place
@@ -146,7 +152,7 @@ Roughly, per month, in `eu-west-1`, with the committed defaults:
 | Item | Cost |
 |---|---|
 | 2 x EKS control plane | ~$146 |
-| 4 x `t3.large` on-demand (2 per cluster) | ~$243 |
+| 4 x `m7i-flex.large` on-demand (2 per cluster) | ~$280 |
 | 2 x NAT gateway (`single_nat_gateway = true`) | ~$65 |
 | 1 x internal NLB (the telemetry gateway) | ~$17 + LCU |
 | Flow logs / CloudWatch / KMS / ECR | ~$5–15 |
@@ -155,8 +161,13 @@ The NLB is the only hourly charge the Kubernetes layer adds — raw VPC peering
 has none. `make platform-destroy` reclaims it without touching the clusters.
 
 **Idle clusters burn the budget.** `terraform destroy` between test runs. Set
-`single_nat_gateway = false` and `node_instance_types = ["t3.medium"]` to trade
-HA for spend in the other direction.
+`single_nat_gateway = false` to trade HA for spend in the other direction.
+
+**Instance type is account-constrained.** An AWS Free Plan account rejects `RunInstances`
+for any type that is not free-tier-eligible, and the node group then hangs in `CREATING`
+with an empty `health.issues` — the reason appears only in CloudTrail. Check with
+`aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true`.
+`m7i-flex.large` is eligible and gives 2 vCPU / 8 GiB.
 
 ## Verification
 
@@ -178,7 +189,16 @@ only as a `CrashLoopBackOff` on a running cluster. It already caught one:
 `otelcol.exporter.debug` is an experimental component, and Alloy refuses to start
 unless the stability level admits it.
 
-**Current status.** All three root modules validate; 6 module suites pass (32
-assertions); 3 Alloy configs validate against `grafana/alloy:v1.12.0`. Stage 1
-last planned **149 resources to add with zero errors** against a live account.
-Nothing has been applied — no AWS resources were created.
+`make lgtm-validate` renders every LGTM values file against the real upstream charts and
+asserts on the resulting manifests. It has caught a bundled Kafka StatefulSet, a persistence
+key Helm accepted and ignored, and an image reference that was syntactically valid and
+unpullable — none of which any values assertion could see.
+
+**Current status.** All three root modules validate; **12 module suites pass with 81
+assertions**; 3 Alloy configs validate against `grafana/alloy:v1.12.0`; all four Helm value
+sets render against their charts.
+
+The platform has been **applied end to end against a live account and torn down again**.
+Metrics, logs and traces were verified flowing from Cluster A into Mimir, Loki and Tempo on
+Cluster B, with the evidence in [`../docs/proof-of-life/`](../docs/proof-of-life/). Stage 1
+last planned **224 resources to add with zero errors**.

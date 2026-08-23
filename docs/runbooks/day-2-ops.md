@@ -303,7 +303,7 @@ absence is a design opinion, not an oversight.
 |---|---|---|
 | **metrics-server** | **Deployed** on both clusters | Any CPU/memory HPA. Without it `kubectl top` fails and HPA reports `<unknown>` forever |
 | **KEDA** or **prometheus-adapter** | Not installed | Custom metrics. KEDA is the better fit — it speaks PromQL directly and gives per-direction scaling policies |
-| **Mimir scraping itself** | Not configured | Every metric below comes from Mimir's own `/metrics`. Today only Cluster A's kubelets are scraped |
+| **Mimir scraping itself** | Not configured | Every metric below comes from Mimir's own `/metrics`. Cluster A's kubelets are scraped, and Tempo writes span metrics into Mimir, but no LGTM component's own `/metrics` is collected |
 
 That third row is the interesting one: **autoscaling the observability stack requires the
 observability stack to observe itself.** Cluster B currently has no Alloy scraping its own
@@ -431,11 +431,13 @@ Found while writing this. All are real, none are blocking today, and each is sma
 
 **Still open**, in the order they are worth doing:
 
-1. **Cluster B does not observe itself.** Every autoscaling metric in Part 2 comes from
-   Mimir's own `/metrics`, and nothing currently scrapes it. This is the next real blocker
-   for ingester autoscaling — metrics-server covers CPU and memory, but the series-count
-   signal that actually matters does not exist yet. A `prometheus.scrape` of the `lgtm`
-   namespace added to the gateway's pipeline closes it.
+1. **Cluster B only partly observes itself.** Tempo's metrics generator now remote-writes
+   span and service-graph metrics into Mimir, so the observability plane produces some of its
+   own telemetry. But nothing scrapes Mimir's, Loki's or Tempo's `/metrics` endpoints, and
+   `cortex_ingester_memory_series` — the signal Part 2 argues is the only correct trigger for
+   ingester autoscaling — comes from exactly there. metrics-server covers CPU and memory,
+   which Part 2 argues is the wrong signal. A `prometheus.scrape` of the `lgtm` namespace
+   added to the gateway's pipeline closes it, and it remains the next real blocker.
 2. **KEDA is not installed.** Needed for the PromQL-driven `ScaledObject` above.
    metrics-server alone gets you CPU-based scaling, which Part 2 argues is the wrong signal
    for ingesters.
