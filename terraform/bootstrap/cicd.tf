@@ -23,14 +23,26 @@
 locals {
   github_oidc_enabled = var.github_repository != ""
 
+  owner = split("/", var.github_repository)[0]
+  repo  = split("/", var.github_repository)[1]
+
   github_oidc_url = "https://token.actions.githubusercontent.com"
 
-  # `sub` claim prefixes. GitHub builds these from the repository and the
-  # context the job runs in.
-  #   repo:OWNER/REPO:ref:refs/heads/main
-  #   repo:OWNER/REPO:environment:prod-infra
-  #   repo:OWNER/REPO:pull_request
-  sub_prefix = "repo:${var.github_repository}"
+  # These policies condition on the DEDICATED claims — repository, environment,
+  # ref — and never on `sub`.
+  #
+  # `sub` is the pattern every tutorial reaches for, and it is now a trap.
+  # GitHub issues immutable subject claims, so `sub` reads
+  #
+  #   repo:OWNER@1234567/REPO@7654321:ref:refs/heads/main
+  #
+  # with numeric IDs interpolated to survive a rename. A policy matching
+  # "repo:OWNER/REPO:*" therefore matches nothing, and the only symptom is
+  # "Not authorized to perform sts:AssumeRoleWithWebIdentity" with no hint that
+  # the claim shape is the problem.
+  #
+  # The dedicated claims carry no IDs, express the intent directly, and are
+  # unaffected by that change.
 
   ci_roles = local.github_oidc_enabled ? {
     plan = {
@@ -39,21 +51,19 @@ locals {
       # Any ref, because plans run on pull requests and feature branches.
       # Safe because the role can read but not change anything, except the
       # state lock it must take.
-      subject_condition = "StringLike"
-      subjects          = ["${local.sub_prefix}:*"]
-      managed_policies  = ["arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess"]
+      extra_conditions = {}
+      managed_policies = ["arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess"]
     }
 
     apply = {
       role_name   = "${var.project}-ci-apply"
       description = "GitHub Actions: terraform apply. Assumable only from a protected Environment."
-      # StringEquals, not StringLike. Exact environment names and nothing else,
-      # so a workflow that forgets `environment:` cannot obtain this role.
-      subject_condition = "StringEquals"
-      subjects = [
-        "${local.sub_prefix}:environment:${var.infra_environment_name}",
-        "${local.sub_prefix}:environment:${var.platform_environment_name}",
-      ]
+      # The `environment` claim is present ONLY when the job declares
+      # `environment:`, so a workflow that forgets it cannot obtain this role.
+      # Exact names, not a pattern.
+      extra_conditions = {
+        "environment" = [var.infra_environment_name, var.platform_environment_name]
+      }
       # PowerUser covers everything except IAM and Organizations; the IAM half
       # is granted separately below, scoped to the names our modules create.
       managed_policies = ["arn:${data.aws_partition.current.partition}:iam::aws:policy/PowerUserAccess"]
@@ -65,9 +75,10 @@ locals {
       # Main only. scripts/mirror-images.sh is in-tree, so allowing this role
       # from a pull request would let an untrusted branch decide what gets
       # pushed into the registry both clusters pull from.
-      subject_condition = "StringEquals"
-      subjects          = ["${local.sub_prefix}:ref:refs/heads/main"]
-      managed_policies  = []
+      extra_conditions = {
+        "ref" = ["refs/heads/main"]
+      }
+      managed_policies = []
     }
   } : {}
 }
@@ -115,14 +126,32 @@ resource "aws_iam_role" "ci" {
           Federated = aws_iam_openid_connect_provider.github[0].arn
         }
         Condition = {
-          # Both conditions are required. `aud` alone would let ANY GitHub
+          # `repository` pins WHICH repo; `aud` pins that the token was minted
+          # for STS. Both are required — `aud` alone would let any GitHub
           # repository on the internet assume this role.
-          StringEquals = {
-            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          #
+          # Each role then adds the claim that narrows it further: `environment`
+          # for apply, `ref` for the registry push.
+          # AWS REFUSES a trust policy for a GitHub OIDC principal that does not
+          # scope on `sub` or `job_workflow_ref`, so `sub` cannot simply be
+          # dropped. It is matched loosely here, with the `@<id>` suffixes
+          # wildcarded, and the exact pinning is done by the `repository`
+          # StringEquals below — which carries no IDs and cannot be widened by
+          # a rename.
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${local.owner}*/${local.repo}*:*"
           }
-          (each.value.subject_condition) = {
-            "token.actions.githubusercontent.com:sub" = each.value.subjects
-          }
+
+          StringEquals = merge(
+            {
+              "token.actions.githubusercontent.com:aud"        = "sts.amazonaws.com"
+              "token.actions.githubusercontent.com:repository" = var.github_repository
+            },
+            {
+              for claim, values in each.value.extra_conditions :
+              "token.actions.githubusercontent.com:${claim}" => values
+            },
+          )
         }
       },
     ]
