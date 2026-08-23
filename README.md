@@ -234,9 +234,22 @@ flowchart LR
   GP --> AP["apply-platform"]
 ```
 
+### Branches
+
+| Branch | What runs | What it can do |
+|---|---|---|
+| `development` | `ci.yaml` — lint, validate, 81 assertions, chart renders, read-only infra plan | Nothing. The plan role is read-only; there is no apply path off `main` |
+| `main` | `deploy.yaml` — the gated chain above | Applies, but only after a human approves at the Environment gate |
+
+Work lands on `development`, where every check runs against a read-only AWS role, and is
+merged to `main` when it is ready to be deployed. The split is enforced rather than
+conventional: `deploy.yaml` triggers only on `main`, and the `ci-ecr-push` role's trust
+policy is pinned to `refs/heads/main`, so a branch cannot push to the registry both clusters
+pull from even if its workflow tried.
+
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| [`ci.yaml`](.github/workflows/ci.yaml) | PR, branch push | fmt · validate · 81 assertions · chart renders · Alloy validation · infra plan |
+| [`ci.yaml`](.github/workflows/ci.yaml) | PR, push to any branch but `main` | fmt · validate · 81 assertions · chart renders · Alloy validation · infra plan |
 | [`deploy.yaml`](.github/workflows/deploy.yaml) | push to `main`, manual | the gated chain above |
 | [`destroy.yaml`](.github/workflows/destroy.yaml) | manual only | teardown, platform first, typed confirmation |
 
