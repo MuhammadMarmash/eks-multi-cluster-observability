@@ -252,19 +252,21 @@ concurrency lock.
 
 ## Proof of life
 
-![Mimir in Cluster B showing metrics from Cluster A](docs/proof-of-life/01-mimir-metrics-from-cluster-a.png)
+All three signals, collected on **Cluster A** and read from Grafana on **Cluster B**.
 
-Grafana in **Cluster B**, querying **Mimir**, showing a series labelled
-`obs-platform-prod-workload`. That label is stamped by the Alloy agent on Cluster A and by
-nothing else — so the data crossed the peering link, authenticated at the gateway, and was
-written to S3.
+| | |
+|---|---|
+| ![Metrics in Mimir](docs/proof-of-life/01-mimir-metrics-from-cluster-a.png) | ![A distributed trace in Tempo](docs/proof-of-life/02-tempo-distributed-trace.png) |
+| **Metrics** — container CPU from Cluster A's kubelets, grouped by `cluster` | **Traces** — one request across 3 services and 8 spans, `frontend-proxy → frontend → cart → HGET` |
+| ![The service graph](docs/proof-of-life/03-tempo-service-graph.png) | ![Logs in Loki](docs/proof-of-life/04-loki-logs-from-cluster-a.png) |
+| **Service graph** — RED metrics and topology, from span metrics Tempo writes into Mimir | **Logs** — ~33k lines from the application namespace, labelled with their origin cluster |
 
-Metrics and logs are flowing. **Traces are not yet**, because no application is deployed on
-Cluster A to emit them; the agent has kubelet metrics and pod logs to ship, but no OTLP
-source. [`docs/proof-of-life/`](docs/proof-of-life/) states exactly what is and is not
-demonstrated, and what closes the gap.
+Every query filters on `obs-platform-prod-workload`, a label stamped by the Alloy agent on
+Cluster A and by nothing else — so the data crossed the peering link, authenticated at the
+gateway, and was written to S3.
 
----
+[`docs/proof-of-life/`](docs/proof-of-life/) has the queries, the same claims as raw API
+responses, and the two gotchas worth knowing before reproducing it.
 
 ## Lessons learned
 
