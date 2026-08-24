@@ -86,8 +86,11 @@ variable "tempo_chart_version" {
     grafana/tempo (single-binary) chart version. Matches scripts/mirror-images.sh.
 
     The single-binary chart, not tempo-distributed: one pod instead of six,
-    which is what makes the stack fit on t3.medium nodes. Both charts are
-    deprecated upstream; this one is a sixth of the footprint.
+    which is what makes the whole LGTM stack fit on two 8 GiB nodes.
+
+    Both Tempo charts are deprecated upstream in favour of the k8s-monitoring
+    umbrella chart. Neither is a safe long-term home, so this picks the one a
+    sixth the size and pins it. Revisit when k8s-monitoring is adopted.
   EOT
   type        = string
   default     = "1.24.4"
@@ -143,7 +146,7 @@ variable "replication_factor" {
     Ingester replication factor for Mimir, Loki and Tempo.
 
     All three default to 3, which also sets their MINIMUM ingester count — a
-    chart left at the default will not start on a two-node t3.large cluster.
+    chart left at the default will not start on a two-node 8 GiB cluster.
     1 is the cost-sane choice for a demo and means un-flushed data lives on
     exactly one ingester. Raise to 3 with matching ingester counts before this
     carries anything anyone depends on.
@@ -173,7 +176,7 @@ variable "enable_caches" {
     Deploy the memcached tiers (Loki chunks/results cache, Tempo memcached).
 
     Off by default and that is not a small saving: Loki's chunksCache alone
-    requests 8192 MiB, which is an entire t3.large node. Turn these on only
+    requests 8192 MiB, which is an entire 8 GiB node. Turn these on only
     after the node group has room for them.
   EOT
   type        = bool

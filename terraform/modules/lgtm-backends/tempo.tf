@@ -3,7 +3,7 @@
 #
 # The SINGLE-BINARY chart, not tempo-distributed. One pod instead of six,
 # reclaiming roughly 0.7 vCPU and 2 GiB — which is what makes the stack fit on
-# t3.medium nodes at all.
+# two 8 GiB nodes at all.
 #
 # Both Tempo charts are marked `deprecated: true` upstream, so the swap buys
 # compute rather than support. appVersion 2.9.0 is current in both.
