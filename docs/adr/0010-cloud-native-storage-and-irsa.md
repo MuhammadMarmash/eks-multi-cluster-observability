@@ -11,6 +11,14 @@ cluster is torn down nightly against a $50 budget; if the data lives on an EBS v
 attached to a node, it dies with the node group, and the entire premise of a *centralized*
 observability plane goes with it.
 
+**"Durable" is the operative word.** This rules out node-attached disks as a *system of
+record*; it does not rule out a scratch volume in front of one. Mimir's ingester keeps a
+write-ahead log for the records it has acknowledged but not yet flushed into a block, and
+that WAL is not optional — the ingester will not start without somewhere to put it. So one
+PVC survives this decision, and only one: a small gp3 volume per ingester, described in
+[Consequences](#consequences) below. Nothing that has reached S3 is on it, and losing it
+costs at most the last flush interval.
+
 Three questions follow from that: what encrypts the buckets, what ages the data out, and
 how the components authenticate without a key sitting in a Secret somewhere.
 
@@ -151,6 +159,14 @@ falls back to the node instance role, and fails on its first S3 write with an op
   data. That is the entire point of Section 3.
 - Retention is capped at 90 days for metrics and logs, 30 for traces. Anything requiring
   longer retention needs a lifecycle change and a fresh look at cost.
+- **One PVC remains, by necessity.** The Mimir ingester mounts a gp3 volume for its
+  write-ahead log — the only node-attached storage anywhere in the stack. It is a staging
+  buffer, not a system of record: every block it protects is replicated across ingesters and
+  lands in S3 within the flush interval. Its `retentionPolicy` is `whenDeleted: Delete` /
+  `whenScaled: Retain`, so a teardown reclaims it while a scale-down does not discard an
+  un-flushed WAL. This is also why `modules/storage-class` exists — EKS ships **no default
+  StorageClass**, and without one those PVCs sit `Pending` and the Helm release times out
+  with `context deadline exceeded`, naming nothing useful.
 - The `lgtm` namespace is now load-bearing. It is pinned in three trust policies, and
   moving the stack to a different namespace invalidates all three at once.
 - Switching to SSE-KMS later requires a key, a key policy naming the three roles, and

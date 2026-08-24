@@ -67,6 +67,8 @@ reasoning in [ADR 0008](../docs/adr/0008-two-stage-terraform.md).
 | **Private hosted zone + internal NLB, not a CoreDNS stub** | The two clusters share no DNS namespace. One zone associated with *both* VPCs resolves the gateway below Kubernetes, so an EKS CoreDNS add-on upgrade cannot undo it. [ADR 0007](../docs/adr/0007-cross-cluster-name-resolution.md). |
 | **Security group on the NLB, not only the nodes** | NLB `ip` targets do not preserve the client IP by default, so a CIDR rule attached only to nodes never sees Cluster A's address and quietly matches nothing. |
 | **Two root modules** | Provider config cannot come from resources in the same apply. [ADR 0008](../docs/adr/0008-two-stage-terraform.md). |
+| **Tempo single-binary, not `tempo-distributed`** | One pod instead of six. The distributed chart's ingester, distributor, querier, query-frontend, compactor and metrics-generator each carry their own requests; at this trace volume they buy nothing and the stack no longer fits two 8 GiB nodes. **Both charts are deprecated upstream** in favour of `k8s-monitoring`, so neither is a long-term home — this pins the one a sixth the size. |
+| **Mimir keeps one PVC** | The ingester WAL is the single exception to "everything durable lives in S3", and the ingester will not start without it. EKS ships no default StorageClass, so `modules/storage-class` provides a gp3 one; without it the PVCs sit `Pending` and Helm fails with `context deadline exceeded`. [ADR 0010](../docs/adr/0010-cloud-native-storage-and-irsa.md). |
 
 ## Usage
 
@@ -78,14 +80,29 @@ cp terraform.tfvars.example terraform.tfvars   # set a globally-unique bucket na
 terraform init
 terraform apply
 terraform output backend_config_snippet        # -> paste into envs/prod/backend.hcl
+terraform output ci_role_arns                  # -> needed by step 2, below
+terraform output github_actions_variables      # -> GitHub Settings -> Variables
 ```
 
+If CI will ever run this, also create the two **GitHub Environments** now —
+`prod-infra` and `prod-platform`, each with at least one **required reviewer**.
+The apply and destroy jobs declare them, and the apply role's trust policy is
+scoped on the `environment` claim, so the gate is enforced by IAM and not only
+by GitHub. An environment that exists without a reviewer gates nothing.
+
 ### 2. Apply the platform
+
+Set **`cluster_admin_role_arns`** in the tfvars file before applying — your own
+IAM/SSO role plus the `ci-plan` and `ci-apply` ARNs printed in step 1. Each becomes
+an EKS access entry granting `cluster-admin` on both clusters, and it is the only
+practical way in: without it the clusters answer to nothing but the principal that
+ran this apply, stage 2 cannot configure its providers, and repairing it from
+outside the cluster needs the very access it is supposed to grant.
 
 ```bash
 cd ../envs/prod
 cp backend.hcl.example backend.hcl             # bucket / region / kms_key_id
-cp terraform.tfvars.example terraform.tfvars   # ACCOUNT ID + API allow-list CIDRs
+cp terraform.tfvars.example terraform.tfvars   # ACCOUNT ID + allow-list CIDRs + admin ARNs
 
 terraform init -backend-config=backend.hcl
 terraform fmt -recursive -check
@@ -194,8 +211,8 @@ asserts on the resulting manifests. It has caught a bundled Kafka StatefulSet, a
 key Helm accepted and ignored, and an image reference that was syntactically valid and
 unpullable — none of which any values assertion could see.
 
-**Current status.** All three root modules validate; **12 module suites pass with 81
-assertions**; 3 Alloy configs validate against `grafana/alloy:v1.12.0`; all four Helm value
+**Current status.** All three root modules validate; **12 module suites pass — 81 test cases,
+186 assertions**; 3 Alloy configs validate against `grafana/alloy:v1.12.0`; all four Helm value
 sets render against their charts.
 
 The platform has been **applied end to end against a live account and torn down again**.

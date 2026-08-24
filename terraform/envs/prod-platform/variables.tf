@@ -139,7 +139,15 @@ variable "metrics_server_image_tag" {
 # --- Workload application --------------------------------------------------------
 
 variable "workload_app_namespace" {
-  description = "Namespace the instrumented application runs in on Cluster A."
+  description = <<-EOT
+    Namespace the instrumented application runs in on Cluster A.
+
+    The name predates ADR 0009, which replaced the Online Boutique with the
+    OpenTelemetry Demo. It is kept deliberately: the Proof of Life screenshots
+    in docs/proof-of-life/ show `k8s_namespace_name="boutique"` as the label
+    Loki and Mimir actually carry, and renaming it would leave the evidence
+    contradicting the code it is evidence for. Rename both together or neither.
+  EOT
   type        = string
   default     = "boutique"
 }

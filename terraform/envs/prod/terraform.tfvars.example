@@ -27,19 +27,23 @@ kubernetes_version = "1.34"
 cluster_endpoint_public_access = true
 cluster_public_access_cidrs    = ["203.0.113.10/32"]
 
-# t3.medium and t3.large share the same 2 vCPU; the difference is memory only.
-node_instance_types = ["t3.medium"]
+# The type this platform was deployed and verified on. It is free-tier-eligible,
+# which matters: an AWS Free Plan account rejects RunInstances for anything that
+# is not, and the node group then hangs in CREATING for 30 minutes with an empty
+# health.issues. See the variable's description in variables.tf.
+node_instance_types = ["m7i-flex.large"]
 
-# Cluster A (workload) — the Boutique's eleven services plus the Alloy DaemonSet.
-node_desired_size = 3
-node_min_size     = 3
+# Cluster A (workload) — the application's sixteen services plus the Alloy
+# DaemonSet, on 12.75 GiB allocatable.
+node_desired_size = 2
+node_min_size     = 2
 node_max_size     = 6
 
-# Cluster B (observability) carries the LGTM stack. Two t3.medium nodes yield
-# only 4.75 GiB ALLOCATABLE — kube-reserved is 1465Mi per node once prefix
-# delegation raises max_pods to 110 — and the stack does not fit in that.
-observability_node_desired_size = 3
-observability_node_min_size     = 3
+# Cluster B (observability) carries the LGTM stack: ~60% CPU and 42% memory of
+# two nodes. Three t3.medium would give LESS allocatable memory than two of
+# these, because kube-reserved is 1465Mi per node whatever the instance size.
+observability_node_desired_size = 2
+observability_node_min_size     = 2
 observability_node_max_size     = 6
 
 cluster_admin_role_arns = [

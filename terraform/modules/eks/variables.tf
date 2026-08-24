@@ -124,9 +124,17 @@ variable "node_group_name" {
 }
 
 variable "node_instance_types" {
-  description = "Instance types for the managed node group."
+  description = <<-EOT
+    Instance types for the managed node group.
+
+    envs/prod always passes this explicitly. The default matches it so the
+    module is not a trap on its own: an AWS account on the Free Plan rejects
+    RunInstances for any type that is not free-tier-eligible, and the node
+    group then hangs in CREATING for the full timeout with an empty
+    health.issues, the reason visible only in CloudTrail.
+  EOT
   type        = list(string)
-  default     = ["t3.large"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "node_capacity_type" {

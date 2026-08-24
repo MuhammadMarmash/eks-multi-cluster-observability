@@ -265,7 +265,7 @@ module "grafana" {
 # The resource metrics API. An HPA without it does not degrade, it never
 # functions: it reports `<unknown>` for its target forever.
 #
-# On both clusters because both need it — Cluster A for the Boutique, Cluster B
+# On both clusters because both need it — Cluster A for the workload app, Cluster B
 # for the Mimir ingester autoscaling in docs/runbooks/day-2-ops.md.
 ###############################################################################
 

@@ -115,40 +115,46 @@ variable "node_instance_types" {
   description = <<-EOT
     Instance types for both node groups.
 
-    t3.medium (2 vCPU / 4 GiB). Note that t3.medium and t3.large have the SAME
-    2 vCPU — the difference is memory only, so downsizing costs RAM and nothing
-    else.
+    m7i-flex.large (2 vCPU / 8 GiB). This is the type the platform has actually
+    been deployed and verified on, and it is chosen for two reasons that pull
+    the same way.
 
-    The memory cost is larger than the raw numbers suggest. EKS reserves
-    `255Mi + 11Mi * max_pods`, and prefix delegation raises max_pods to 110, so
-    kube-reserved is 1465Mi PER NODE regardless of instance size. On a t3.large
-    that is 18% of memory; on a t3.medium it is 36%. Real allocatable is
-    ~2.37 GiB per t3.medium node, not 4.
+    ACCOUNT CONSTRAINT. An AWS account on the Free Plan rejects RunInstances for
+    any type that is not free-tier-eligible — t3.medium and t3.large among them.
+    The failure gives nothing away: the node group sits in CREATING for the full
+    30-minute timeout, health.issues stays empty, no Auto Scaling group is ever
+    created, and the reason appears only in CloudTrail. Check what an account
+    permits with:
 
-    That is why the observability node group runs three nodes rather than two —
-    see observability_node_desired_size.
+      aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true
+
+    ALLOCATABLE MEMORY. EKS reserves `255Mi + 11Mi * max_pods` per node, and
+    prefix delegation puts max_pods at 110 — so kube-reserved is 1465Mi per node
+    REGARDLESS of instance size. On a 4 GiB t3.medium that is 36% of memory,
+    leaving ~2.37 GiB; on this 8 GiB type it is 18%, leaving ~6.37 GiB. Two of
+    these therefore give more allocatable memory than three t3.medium, for less
+    money.
   EOT
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "node_desired_size" {
   description = <<-EOT
     Desired node count for Cluster A (workload).
 
-    Three, matching Cluster B. Two t3.medium nodes give 4.75 GiB of ALLOCATABLE
-    memory once kube-reserved is taken out, and the Online Boutique's eleven
-    services plus the Alloy DaemonSet do not leave enough margin in that for a
-    node to go away.
+    Two. At 6.37 GiB allocatable per m7i-flex.large that is 12.75 GiB for the
+    workload application's sixteen services plus the Alloy DaemonSet, which the
+    deployed platform ran at comfortable headroom.
   EOT
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "node_min_size" {
-  description = "Minimum node count for Cluster A. Must not drop below what the Boutique needs to schedule."
+  description = "Minimum node count for Cluster A. Must not drop below what the workload application needs to schedule."
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "node_max_size" {
@@ -167,20 +173,21 @@ variable "observability_node_desired_size" {
   description = <<-EOT
     Desired node count for Cluster B.
 
-    Three, not two. Two t3.medium nodes give 4.75 GiB of ALLOCATABLE memory once
-    kube-reserved is taken out, and the LGTM stack plus the gateway, cert-manager
-    and the load balancer controller do not fit in that. Three gives 7.12 GiB.
+    Two. The LGTM stack requests 1.50 vCPU and 3.34 GiB; with the gateway,
+    cert-manager and the load balancer controller that lands near 60% CPU and
+    42% memory of two m7i-flex.large nodes.
 
-    Three t3.medium nodes also cost less than the two t3.large they replace.
+    Three t3.medium would give LESS allocatable memory than two of these, and
+    cost more — see node_instance_types.
   EOT
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "observability_node_min_size" {
   description = "Minimum node count for Cluster B. Must not drop below what the LGTM stack needs to schedule."
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "observability_node_max_size" {
@@ -210,7 +217,7 @@ variable "addon_versions" {
 # --- ECR -------------------------------------------------------------------------
 
 variable "ecr_repositories" {
-  description = "ECR repositories to create. Defaults cover the mirrored Online Boutique services, the telemetry agents, and the OCI Helm charts."
+  description = "ECR repositories to create. Defaults cover every image and chart scripts/mirror-images.sh pushes, and nothing else."
   type = map(object({
     description          = optional(string, "")
     keep_last_n_images   = optional(number, 30)
@@ -218,13 +225,6 @@ variable "ecr_repositories" {
     protected_tag_prefix = optional(string, "v")
   }))
   default = {
-    "boutique/frontend"          = { description = "Mirrored Online Boutique frontend" }
-    "boutique/cartservice"       = { description = "Mirrored Online Boutique cart service" }
-    "boutique/productcatalog"    = { description = "Mirrored Online Boutique product catalog service" }
-    "boutique/checkoutservice"   = { description = "Mirrored Online Boutique checkout service" }
-    "boutique/loadgenerator"     = { description = "Mirrored Online Boutique load generator" }
-    "observability/lgtm-sidecar" = { description = "Internal sidecar/tooling images for the LGTM stack" }
-    "charts/platform"            = { description = "OCI Helm charts for the platform (LGTM values wrappers, boutique umbrella chart)" }
 
     # Third-party artefacts the Kubernetes layer needs, mirrored so nothing is
     # pulled from a public registry at deploy time (ADR 0005). Versions are

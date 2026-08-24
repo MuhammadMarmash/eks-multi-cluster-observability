@@ -24,7 +24,7 @@ human has approved it — enforced by an **IAM trust policy**, not just a workfl
 flowchart LR
   subgraph A["vpc-workload &nbsp;·&nbsp; 10.0.0.0/16"]
     direction TB
-    BQ["<b>Online Boutique</b><br/>11 OTLP-instrumented services"]
+    BQ["<b>OpenTelemetry Demo</b><br/>16 OTLP-instrumented services"]
     AG["<b>Alloy DaemonSet</b><br/>OTLP receiver · kubelet scrape<br/>pod-log tail → all OTLP"]
     BQ -- OTLP --> AG
   end
@@ -97,7 +97,7 @@ GitHub Actions · OIDC (no static credentials) · GitHub Environments as approva
 - **Exactly two ports cross the peering link.** Alloy converts Prometheus scrapes and pod-log
   tails into OTLP *in-process*, so all three signals leave on one authenticated connection.
   ([ADR 0006](docs/adr/0006-telemetry-agent-selection.md))
-- **81 assertions that need no AWS account.** Every module ships `terraform test` files
+- **81 test cases, 186 assertions, no AWS account.** Every module ships `terraform test` files
   running under `mock_provider`, plus scripts that render every Helm values file against the
   real upstream charts and validate every Alloy config with the real Alloy binary.
 
@@ -134,7 +134,7 @@ terraform/
   bootstrap/            state bucket + GitHub OIDC provider and CI roles  (applied once, by hand)
   envs/prod/            STAGE 1 — VPCs, EKS, ECR, S3 buckets, IRSA roles
   envs/prod-platform/   STAGE 2 — the Kubernetes layer, reads stage 1 via remote state
-  modules/              14 modules; none calls another
+  modules/              16 modules; none calls another
 charts/telemetry-certs/ cert-manager issuers and certificates
 scripts/                ECR mirroring · Alloy config validation · Helm values validation
 .github/workflows/      ci · deploy · destroy
@@ -146,16 +146,21 @@ docs/runbooks/          Day-2 operations
 
 ## Getting started
 
-**Prerequisites** — Terraform ≥ 1.11 · AWS CLI v2 · Helm 3 · Docker · `kubectl` · `jq` ·
-an AWS account you are willing to spend roughly $8–10/day in.
+**Prerequisites**
 
-> **If your AWS account is on the Free Plan**, `RunInstances` rejects any instance type that
-> is not free-tier-eligible, and `t3.medium` is not. The symptom is unhelpful: the node group
-> sits in `CREATING` for the full 30-minute timeout, `health.issues` stays empty, and no Auto
-> Scaling group is ever created. The reason only appears in CloudTrail. Check with
-> `aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true` and set
-> `node_instance_types` accordingly — `m7i-flex.large` is eligible and gives 2 vCPU / 8 GiB,
-> more than the default.
+| | |
+|---|---|
+| **Tooling** | Terraform ≥ 1.11 · AWS CLI v2 · Helm 3 · Docker (with `buildx`) · `kubectl` · `jq` · GNU `make` |
+| **AWS** | An account you are willing to spend roughly **$8–10/day** in, with permission to create VPCs, EKS clusters, IAM roles and OIDC providers |
+| **GitHub** | Admin on the repository — CI needs repository *variables* and two *environments* |
+
+> **The default `m7i-flex.large` is deliberate, not arbitrary.** On an AWS account on the
+> **Free Plan**, `RunInstances` rejects any instance type that is not free-tier-eligible —
+> `t3.medium` and `t3.large` among them. The symptom is unhelpful: the node group sits in
+> `CREATING` for the full 30-minute timeout, `health.issues` stays empty, and no Auto Scaling
+> group is ever created. The reason appears **only in CloudTrail**. If you change
+> `node_instance_types`, check eligibility first:
+> `aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true`.
 
 ### 1. Bootstrap (once per account)
 
@@ -166,15 +171,52 @@ cd terraform/bootstrap
 cp terraform.tfvars.example terraform.tfvars   # bucket name + owner/repo
 terraform init && terraform apply
 terraform output github_actions_variables      # paste into GitHub → Settings → Variables
+terraform output ci_role_arns                  # needed by step 2 — keep this handy
 ```
+
+**Then wire up GitHub, before any CI run.** The apply and destroy jobs are gated on
+[GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments),
+which do not exist until you create them. Under **Settings → Environments**, create both:
+
+| Environment | Gates | Add |
+|---|---|---|
+| `prod-infra` | the infrastructure apply and destroy | at least one **required reviewer** |
+| `prod-platform` | the Kubernetes apply and destroy | at least one **required reviewer** |
+
+Without the required reviewer the environment exists but gates nothing, and `main` applies
+straight to AWS unattended. The gate is enforced twice over: the apply roles' trust policies
+are scoped to `environment:prod-infra` / `environment:prod-platform`, so a job that has not
+passed the gate cannot obtain credentials at all — see [CI/CD](#cicd).
 
 ### 2. Deploy — three stages, and the order is load-bearing
 
 ```bash
 cd terraform
-cp envs/prod/backend.hcl.example envs/prod/backend.hcl
+cp envs/prod/backend.hcl.example envs/prod/backend.hcl        # bucket + KMS key from step 1
 cp envs/prod/terraform.tfvars.example envs/prod/terraform.tfvars
+```
 
+**Now paste the bootstrap role ARNs into `cluster_admin_role_arns`** in that tfvars file —
+your own SSO/IAM role, plus the plan and apply roles from `terraform output ci_role_arns`:
+
+```hcl
+cluster_admin_role_arns = [
+  "arn:aws:iam::<account>:role/<you>",              # or you cannot run kubectl yourself
+  "arn:aws:iam::<account>:role/<project>-ci-plan",  # plan-platform reads live cluster state
+  "arn:aws:iam::<account>:role/<project>-ci-apply", # apply-platform writes it
+]
+```
+
+Each entry becomes an **EKS access entry** granting `cluster-admin` on *both* clusters. The
+`ci-ecr-push` role is deliberately absent — it only pushes images and never touches a cluster.
+
+Get this wrong and the failure is late and confusing. Leave it empty and the clusters come up
+reachable only by whichever principal ran `apply`: stage 3 fails at provider auth, and so does
+every CI plan and apply of the Kubernetes layer. It is also the one value that is awkward to
+repair after the fact, because fixing it from outside the cluster requires the very access it
+grants.
+
+```bash
 make init && make plan && make apply    # 1. clusters, buckets, IAM   (~20 min)
 make mirror                             # 2. charts + images into ECR
 make platform-init
@@ -183,9 +225,10 @@ make platform-plan && make platform-apply   # 3. Kubernetes layer     (~15 min)
 make verify                             # prints the end-to-end checks, with real names
 ```
 
-Why each gate exists: **stage 2's providers configure themselves from clusters that must
-already exist**, and `helm_release` **resolves charts at plan time**, so an unmirrored chart
-fails the *plan*, not just the apply.
+Why each gate exists: **stage 3's providers configure themselves from clusters that must
+already exist**, so it cannot even initialise before stage 1 finishes; and `helm_release`
+**resolves charts at plan time**, so a chart stage 2 has not mirrored fails the *plan*, not
+just the apply.
 
 ### 3. See it
 
@@ -211,7 +254,7 @@ designed.
 ```bash
 cd terraform
 make validate         # all three root modules
-make test             # 81 assertions across 12 modules, offline via mock_provider
+make test             # 81 test cases / 186 assertions across 12 modules, via mock_provider
 make alloy-validate   # renders each .alloy template, validates with the real Alloy binary
 make lgtm-validate    # renders LGTM values against the real upstream charts
 ```
@@ -238,7 +281,7 @@ flowchart LR
 
 | Branch | What runs | What it can do |
 |---|---|---|
-| `development` | `ci.yaml` — lint, validate, 81 assertions, chart renders, read-only infra plan | Nothing. The plan role is read-only; there is no apply path off `main` |
+| `development` | `ci.yaml` — lint, validate, 81 test cases, chart renders, read-only infra plan | Nothing. The plan role is read-only; there is no apply path off `main` |
 | `main` | `deploy.yaml` — the gated chain above | Applies, but only after a human approves at the Environment gate |
 
 Work lands on `development`, where every check runs against a read-only AWS role, and is
@@ -249,7 +292,7 @@ pull from even if its workflow tried.
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| [`ci.yaml`](.github/workflows/ci.yaml) | PR, push to any branch but `main` | fmt · validate · 81 assertions · chart renders · Alloy validation · infra plan |
+| [`ci.yaml`](.github/workflows/ci.yaml) | PR, push to any branch but `main` | fmt · validate · 81 test cases · chart renders · Alloy validation · infra plan |
 | [`deploy.yaml`](.github/workflows/deploy.yaml) | push to `main`, manual | the gated chain above |
 | [`destroy.yaml`](.github/workflows/destroy.yaml) | manual only | teardown, platform first, typed confirmation |
 
@@ -331,6 +374,22 @@ design depended on. And metrics-server was not installed anywhere, which does no
 HPA so much as prevent one from ever functioning. Both are now fixed. **Documenting a system
 honestly is a test of it.**
 
+**5. GitHub's OIDC subject claim is not what the AWS documentation assumes.**
+Every guide scopes the trust policy on `sub`, e.g. `repo:owner/repo:environment:prod-infra`.
+This repository has **immutable subject claims** enabled, so the token GitHub actually issues
+reads `repo:owner@66663930/repo@1340503365:environment:prod-infra` — the numeric IDs make the
+claim survive a rename, and make every literal `sub` condition fail. The error is
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`, which says nothing about why.
+
+Dropping the `sub` condition is not an option either: **AWS refuses to save a GitHub OIDC
+trust policy that constrains neither `sub` nor `job_workflow_ref`.** So the `sub` condition
+stays as a deliberately permissive `StringLike` (`repo:owner*/repo*:*`) purely to satisfy that
+rule, and the real pinning moved to claims that are not rewritten — `repository`,
+`environment` and `ref`, matched with `StringEquals`. The gate is *stronger* for it: the
+apply role is now scoped on the environment claim directly, so a job that skipped the
+approval cannot mint credentials at all. Finding it took decoding a live token in a
+throwaway workflow; no amount of reading the policy would have shown it.
+
 ---
 
 ## Cost
@@ -340,7 +399,7 @@ Roughly per month in `eu-west-1` with committed defaults, if left running:
 | Item | Cost |
 |---|---|
 | 2 × EKS control plane | ~$146 |
-| 6 × `t3.medium` (3 per cluster) | ~$200 |
+| 4 × `m7i-flex.large` (2 per cluster) | ~$280 |
 | 2 × NAT gateway | ~$65 |
 | 1 × internal NLB | ~$17 |
 | S3 · ECR · KMS · flow logs | ~$10–20 |

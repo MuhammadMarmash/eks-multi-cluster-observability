@@ -8,7 +8,7 @@
 
 The platform runs two EKS clusters:
 
-- **Cluster A (workload)** — the Google Online Boutique fleet plus the OpenTelemetry
+- **Cluster A (workload)** — the instrumented application fleet plus the OpenTelemetry
   Collector agents that forward its telemetry.
 - **Cluster B (observability)** — the centralized LGTM stack (Loki, Grafana, Tempo, Mimir).
 

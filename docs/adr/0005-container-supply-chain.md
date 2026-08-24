@@ -6,7 +6,7 @@
 
 ## Context
 
-The platform runs third-party images (Online Boutique, the LGTM components, the
+The platform runs third-party images (the workload application, the LGTM components, the
 OpenTelemetry Collector) and will run internally built ones. Pulling any of them straight
 from Docker Hub or a public chart repo at deploy time means: no CVE policy, no audit trail
 of what was actually deployed, exposure to upstream tag mutation, and exposure to registry

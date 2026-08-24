@@ -113,7 +113,7 @@ locals {
       rules = { enabled = false }
     }
 
-    # chunksCache requests 8192Mi by default — an entire t3.large node for a
+    # chunksCache requests 8192Mi by default — an entire 8 GiB node for a
     # cache, before Loki itself has started.
     chunksCache  = { enabled = var.enable_caches }
     resultsCache = { enabled = var.enable_caches }
