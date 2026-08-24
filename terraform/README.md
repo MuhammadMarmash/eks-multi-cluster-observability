@@ -218,4 +218,4 @@ sets render against their charts.
 The platform has been **applied end to end against a live account and torn down again**.
 Metrics, logs and traces were verified flowing from Cluster A into Mimir, Loki and Tempo on
 Cluster B, with the evidence in [`../docs/proof-of-life/`](../docs/proof-of-life/). Stage 1
-last planned **224 resources to add with zero errors**.
+last planned **210 resources to add with zero errors**, in CI, against the real account.
